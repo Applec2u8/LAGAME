@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import styled from 'styled-components'
+import { useScrollRestore } from '../../hooks/useScrollRestore'
 import CommentSection from '../../components/CommentSection/CommentSection'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
 import Seo from '../../components/Seo'
@@ -24,6 +26,9 @@ const Sub = styled.p`
 
 export default function CommentsPage() {
   const { t } = useLanguage()
+  const [loading, setLoading] = useState(true)
+  useScrollRestore(!loading)
+  
   const pageTitle = 'Guestbook & Reviews'
   const pageDescription = 'Read reviews and leave comments about your favorite free PC games on LA-GAME.'
   const pageKeywords = 'game reviews, guestbook, pc game comments, free game feedback'
@@ -50,7 +55,7 @@ export default function CommentsPage() {
           <Title>{t('comments.title')}</Title>
           <Sub>{t('comments.sub')}</Sub>
         </Hero>
-        <CommentSection type="website" />
+        <CommentSection type="website" onLoadComplete={() => setLoading(false)} />
       </Page>
     </>
   )

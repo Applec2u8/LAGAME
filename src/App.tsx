@@ -26,6 +26,16 @@ import ProtectedAdminRoute from './components/ProtectedAdminRoute'
 import { LanguageProvider } from './lib/i18n/LanguageContext'
 import { CategoryTranslatorProvider } from './lib/i18n/CategoryTranslator'
 
+import { saveScrollBeforeUnload } from './hooks/useScrollRestore'
+
+// Disable browser's native scroll restoration so we can control it manually
+if (typeof window !== 'undefined') {
+  window.history.scrollRestoration = 'manual'
+  window.addEventListener('beforeunload', () => {
+    saveScrollBeforeUnload()
+  })
+}
+
 function App() {
   return (
     <LanguageProvider>

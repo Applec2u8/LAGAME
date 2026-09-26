@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
-import styled from 'styled-components'
+﻿import React, { useState, useEffect, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import type { Game, DownloadLink, Category } from '../../lib/supabase'
@@ -10,8 +9,16 @@ import { trackGameView } from '../../lib/analytics'
 import CommentSection from '../../components/CommentSection/CommentSection'
 import PCSpecChecker from '../../components/PCSpecChecker/PCSpecChecker'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
+import { markReturnFromDetail } from '../../hooks/useScrollRestore';
 import Seo from '../../components/Seo'
 import { getPageUrl, DEFAULT_IMAGE } from '../../lib/seo'
+import {
+  Page, Back, Hero, CoverImg, CoverPlaceholder, Info, CategoryBadge, Title,
+  Description, Section, SectionTitle, DownloadBtn, CloudName, DownArrow, SpecGrid,
+  SpecCard, SpecTitle, GalleryWrap, GalleryScroll, Screenshot, Lightbox,
+  LightboxNav, LightboxCounter, LoadingPage, ComingSoonBadge, ComingSoonTitle, ComingSoonSub
+} from './GameDetailStyles'
+
 
 
 const CLOUD_ICONS: Record<string, string> = {
@@ -32,161 +39,6 @@ const getYoutubeId = (url: string) => {
   return (match && match[2].length === 11) ? match[2] : null;
 }
 
-const Page = styled.div`max-width: 1100px; margin: 0 auto; padding: 32px 24px;`
-
-const Back = styled(Link)`
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; color: rgba(148,163,184,0.7);
-  margin-bottom: 24px; transition: color 0.2s;
-  &:hover { color: #e2e8f0; }
-`
-
-const Hero = styled.div`
-  display: grid; grid-template-columns: 320px 1fr; gap: 32px;
-  @media (max-width: 768px) { grid-template-columns: 1fr; }
-`
-
-const CoverImg = styled.img`
-  width: 100%; border-radius: 16px;
-  border: 1px solid rgba(124,58,237,0.2);
-  box-shadow: 0 0 40px rgba(124,58,237,0.2);
-  transition: transform 0.3s;
-`
-
-const CoverPlaceholder = styled.div`
-  width: 100%; aspect-ratio: 3/4;
-  border-radius: 16px; background: linear-gradient(135deg, #12121f, #1a1a2e);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 64px; border: 1px solid rgba(124,58,237,0.2);
-`
-
-const Info = styled.div``
-
-const CategoryBadge = styled.span`
-  display: inline-flex; align-items: center; padding: 4px 12px;
-  border-radius: 999px; font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  background: rgba(124,58,237,0.15); color: #9d5cf5;
-  border: 1px solid rgba(124,58,237,0.25); margin-bottom: 12px;
-`
-
-const Title = styled.h1`
-  font-family: 'Noto Sans Lao', sans-serif; font-size: clamp(1.6rem, 4vw, 2.4rem);
-  font-weight: 900; color: #fff; margin-bottom: 16px; line-height: 1.15;
-`
-
-const Description = styled.p`
-  font-size: 14px; line-height: 1.7;
-  color: rgba(148,163,184,0.8); margin-bottom: 28px;
-`
-
-const Section = styled.div`margin-top: 32px;`
-
-const SectionTitle = styled.h2`
-  font-family: 'Noto Sans Lao', sans-serif; font-size: 16px; font-weight: 700;
-  color: #fff; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
-  &::after { content: ''; flex: 1; height: 1px; background: rgba(124,58,237,0.2); }
-`
-
-const DownloadBtn = styled.button`
-  display: flex; align-items: center; gap: 12px;
-  width: 100%; padding: 14px 20px; margin-bottom: 10px;
-  background: rgba(18,18,31,0.9); border: 1px solid rgba(124,58,237,0.25);
-  border-radius: 12px; cursor: pointer; transition: all 0.2s;
-  color: #e2e8f0; text-align: left;
-  &:hover { border-color: rgba(124,58,237,0.6); background: rgba(124,58,237,0.1); transform: translateX(4px); }
-`
-
-const CloudName = styled.span`font-size: 15px; font-weight: 600; flex: 1;`
-const DownArrow = styled.span`font-size: 12px; color: rgba(148,163,184,0.5); display: flex; align-items: center; gap: 4px;`
-
-const SpecGrid = styled.div`
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-  @media (max-width: 600px) { grid-template-columns: 1fr; }
-`
-
-const SpecCard = styled.div`
-  background: rgba(18,18,31,0.8); border: 1px solid rgba(124,58,237,0.15);
-  border-radius: 12px; padding: 18px;
-`
-
-const SpecTitle = styled.h4`
-  font-family: 'Noto Sans Lao', sans-serif; font-size: 13px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  color: rgba(148,163,184,0.6); margin-bottom: 14px; display: flex; align-items: center; gap: 6px;
-`
-
-
-
-// Screenshots gallery
-const GalleryWrap = styled.div`position: relative;`
-const GalleryScroll = styled.div`
-  display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px;
-  scroll-snap-type: x mandatory;
-  &::-webkit-scrollbar { height: 4px; }
-  &::-webkit-scrollbar-track { background: rgba(18,18,31,0.5); }
-  &::-webkit-scrollbar-thumb { background: #7c3aed; border-radius: 2px; }
-`
-const Screenshot = styled.img`
-  height: 180px; aspect-ratio: 16/9; border-radius: 10px; flex-shrink: 0;
-  object-fit: cover; scroll-snap-align: start; cursor: pointer;
-  border: 1px solid rgba(124,58,237,0.15);
-  transition: border-color 0.2s, transform 0.2s;
-  &:hover { border-color: rgba(124,58,237,0.5); transform: scale(1.02); }
-`
-
-// Lightbox
-const Lightbox = styled.div`
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,0.9); backdrop-filter: blur(8px);
-  display: flex; align-items: center; justify-content: center;
-  animation: fadeIn 0.2s ease;
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-`
-
-const LightboxNav = styled.button`
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 52px; height: 52px; border-radius: 50%;
-  background: rgba(255,255,255,0.12); backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,0.2); color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: background 0.2s, transform 0.2s;
-  &:hover { background: rgba(124,58,237,0.6); transform: translateY(-50%) scale(1.1); }
-  &:disabled { opacity: 0.25; cursor: default; }
-`
-const LightboxCounter = styled.div`
-  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
-  border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
-  padding: 5px 14px; font-size: 13px; color: rgba(255,255,255,0.8);
-`
-
-const LoadingPage = styled.div`
-  display: flex; align-items: center; justify-content: center;
-  min-height: 60vh; color: rgba(148,163,184,0.6); gap: 12px; font-size: 14px;
-`
-
-const ComingSoonBadge = styled.div`
-  display: flex; flex-direction: column; align-items: center; gap: 14px;
-  padding: 28px 24px;
-  background: linear-gradient(135deg, rgba(124,58,237,0.12), rgba(251,191,36,0.08));
-  border: 1px solid rgba(251,191,36,0.3);
-  border-radius: 16px;
-  margin-bottom: 8px;
-`
-const ComingSoonTitle = styled.div`
-  font-size: 22px; font-weight: 900; letter-spacing: 2px;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, #fbbf24, #f59e0b, #fbbf24);
-  background-size: 200% auto;
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: shimmer 2.5s linear infinite;
-  @keyframes shimmer { 0% { background-position: 0% center; } 100% { background-position: 200% center; } }
-`
-const ComingSoonSub = styled.div`
-  font-size: 13px; color: rgba(148,163,184,0.6); text-align: center; line-height: 1.6;
-`
 
 export default function GameDetailPage() {
   const { slug } = useParams()
@@ -198,7 +50,16 @@ export default function GameDetailPage() {
   const { translateCategoryName } = useCategoryTranslator()
   const [links, setLinks] = useState<DownloadLink[]>([])
   const [loading, setLoading] = useState(true)
-  const [lightbox, setLightbox] = useState<number | null>(null)
+  const [lightbox, setLightbox] = useState<number | null>(null);
+
+  // Mark all possible listing pages so that if the user goes back to any of them, it restores their specific scroll.
+  useEffect(() => {
+    markReturnFromDetail('/');
+    markReturnFromDetail('/az-filter');
+    markReturnFromDetail('/top-games');
+    markReturnFromDetail('/coming-soon');
+  }, []);
+
 
   useEffect(() => {
     if (!slug) return
@@ -295,7 +156,7 @@ export default function GameDetailPage() {
       />
 
       <Page>
-        <Back to="/"><ArrowLeft size={15} /> {t('game.back')}</Back>
+        <Back onClick={() => window.history.length > 2 ? navigate(-1) : navigate('/')}><ArrowLeft size={15} /> {t('game.back')}</Back>
 
         <Hero>
           <div>
@@ -499,13 +360,13 @@ export default function GameDetailPage() {
               src={game.screenshots[lightbox]}
               alt={`Screenshot ${lightbox + 1}`}
               style={{ maxWidth: '90vw', maxHeight: '82vh', borderRadius: 12, boxShadow: '0 0 60px rgba(0,0,0,0.8)', display: 'block' }}
-              onClick={e => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             />
             {/* Prev */}
             <LightboxNav
               style={{ left: 16 }}
               disabled={lightbox === 0}
-              onClick={e => { e.stopPropagation(); setLightbox(i => Math.max((i ?? 1) - 1, 0)) }}
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setLightbox(i => Math.max((i ?? 1) - 1, 0)) }}
             >
               <ChevronLeft size={26} />
             </LightboxNav>
@@ -513,7 +374,7 @@ export default function GameDetailPage() {
             <LightboxNav
               style={{ right: 16 }}
               disabled={lightbox === game.screenshots.length - 1}
-              onClick={e => { e.stopPropagation(); setLightbox(i => Math.min((i ?? 0) + 1, game.screenshots.length - 1)) }}
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setLightbox(i => Math.min((i ?? 0) + 1, game.screenshots.length - 1)) }}
             >
               <ChevronRight size={26} />
             </LightboxNav>
@@ -523,7 +384,7 @@ export default function GameDetailPage() {
             <button
               onClick={() => setLightbox(null)}
               style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 14, backdropFilter: 'blur(4px)' }}
-            >✕ Close</button>
+            >âœ• Close</button>
           </Lightbox>
         )}
         <CommentSection type="game" gameId={game.id} />

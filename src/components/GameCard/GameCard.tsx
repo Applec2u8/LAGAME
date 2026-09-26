@@ -149,7 +149,7 @@ type Props = {
 export default function GameCard({ game }: Props) {
   const { translateCategoryName } = useCategoryTranslator()
   return (
-    <Card to={`/game/${game.slug}`}>
+    <Card to={`/game/${game.slug}`} onClick={() => sessionStorage.setItem(`scroll_${window.location.pathname}`, window.scrollY.toString())}>
       <CoverWrap>
         {game.cover_image ? (
           <Cover src={game.cover_image} alt={game.title} loading="lazy" />

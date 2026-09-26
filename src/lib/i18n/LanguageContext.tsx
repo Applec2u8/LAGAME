@@ -22,11 +22,18 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     return (saved as Locale) ?? 'en'
   })
   
-  const [isTranslating, setIsTranslating] = useState(false)
+  const [isTranslating, setIsTranslatingState] = useState(() => {
+    return localStorage.getItem('lapack_translating') === 'true'
+  })
 
   const setLocale = useCallback((l: Locale) => {
     setLocaleState(l)
     localStorage.setItem('lapack_locale', l)
+  }, [])
+
+  const setIsTranslating = useCallback((val: boolean) => {
+    setIsTranslatingState(val)
+    localStorage.setItem('lapack_translating', String(val))
   }, [])
 
   const t = useCallback(

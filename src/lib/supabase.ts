@@ -55,6 +55,7 @@ export type DownloadLink = {
   cloud_name: string
   url: string
   sort_order: number
+  platform?: string
 }
 
 export type AdFormat = 'Popunder' | 'Smartlink' | 'Native Banner' | 'Social Bar' | 'Banner'

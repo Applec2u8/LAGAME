@@ -209,9 +209,10 @@ interface Props {
   gameId?: string
   isAdmin?: boolean
   isPreview?: boolean
+  onLoadComplete?: () => void
 }
 
-export default function CommentSection({ type, gameId, isAdmin = false, isPreview = false }: Props) {
+export default function CommentSection({ type, gameId, isAdmin = false, isPreview = false, onLoadComplete }: Props) {
   const { t, locale } = useLanguage()
   const [comments, setComments] = useState<Comment[]>([])
   const [loading, setLoading] = useState(true)
@@ -253,6 +254,8 @@ export default function CommentSection({ type, gameId, isAdmin = false, isPrevie
   const [showTranslatedIds, setShowTranslatedIds] = useState<Record<string, boolean>>({})
   const [translateLoadingIds, setTranslateLoadingIds] = useState<Record<string, boolean>>({})
   const [translateAllLoading, setTranslateAllLoading] = useState(false)
+  const autoTranslateKey = `lapack_auto_translate_${locale}`
+  const [isAutoTranslate, setIsAutoTranslate] = useState(() => localStorage.getItem(autoTranslateKey) === 'true')
 
   const translationsStorageKey = `lapack_comment_trans_v1_${locale}`
 
@@ -279,9 +282,15 @@ export default function CommentSection({ type, gameId, isAdmin = false, isPrevie
     } catch (e) {
       setCommentTranslations({})
     }
-    setShowTranslatedIds({})
+    
+    // We only reset showTranslatedIds if we are NOT auto-translating.
+    // If auto-translate is on, the separate effect below will handle showing them.
+    if (!isAutoTranslate) {
+      setShowTranslatedIds({})
+    }
+    
     setTranslateLoadingIds({})
-  }, [translationsStorageKey])
+  }, [translationsStorageKey, isAutoTranslate])
 
   const toggleTranslateFor = async (id: string, text: string) => {
     // if already showing translated, toggle off
@@ -313,44 +322,58 @@ export default function CommentSection({ type, gameId, isAdmin = false, isPrevie
     }
   }
 
-  const translateAllComments = async () => {
-    // if currently all shown as translated, reset to originals
-    const allShown = comments.length > 0 && comments.every(c => showTranslatedIds[c.id])
-    if (allShown) {
-      setShowTranslatedIds({})
-      return
-    }
-
-    if (comments.length === 0) return
+  const executeTranslateAll = async (targetComments: Comment[], forceShow = false) => {
+    if (targetComments.length === 0) return
     setTranslateAllLoading(true)
     const nextTranslations = { ...commentTranslations }
     const target = locale === 'th' ? 'th' : locale === 'lo' ? 'lo' : 'en'
     try {
-      // translate sequentially to be gentle with public endpoint
-      for (const c of comments) {
+      for (const c of targetComments) {
         if (!c || !c.id) continue
         if (nextTranslations[c.id]) continue
         try {
           const translated = await googleTranslate(c.content, target)
           nextTranslations[c.id] = translated
-        } catch (e) {
-          // ignore individual failures
-        }
+        } catch (e) { }
       }
 
       setCommentTranslations(nextTranslations)
       try { localStorage.setItem(translationsStorageKey, JSON.stringify(nextTranslations)) } catch (e) { }
-      // mark all as shown
-      const shownMap: Record<string, boolean> = {}
-      comments.forEach(c => { if (c && c.id) shownMap[c.id] = true })
+      const shownMap: Record<string, boolean> = { ...showTranslatedIds }
+      targetComments.forEach(c => { if (c && c.id) shownMap[c.id] = true })
       setShowTranslatedIds(shownMap)
-      showToast(t('comment.translated_all'))
+      if (forceShow) showToast(t('comment.translated_all'))
     } catch (e) {
-      showToast(t('comment.translate_fail'), 'error')
+      if (forceShow) showToast(t('comment.translate_fail'), 'error')
     } finally {
       setTranslateAllLoading(false)
     }
   }
+
+  // Effect to automatically translate when new comments load if auto-translate is enabled
+  useEffect(() => {
+    if (isAutoTranslate && comments.length > 0) {
+      const untranslated = comments.filter(c => !showTranslatedIds[c.id])
+      if (untranslated.length > 0) {
+        executeTranslateAll(untranslated)
+      }
+    }
+  }, [comments, isAutoTranslate])
+
+  const translateAllComments = async () => {
+    const nextAuto = !isAutoTranslate
+    setIsAutoTranslate(nextAuto)
+    localStorage.setItem(autoTranslateKey, String(nextAuto))
+
+    if (!nextAuto) {
+      setShowTranslatedIds({})
+      return
+    }
+
+    if (comments.length === 0) return
+    await executeTranslateAll(comments, true)
+  }
+
 
   useEffect(() => {
     // Load names from localStorage
@@ -400,6 +423,7 @@ export default function CommentSection({ type, gameId, isAdmin = false, isPrevie
     const { data } = await query
     setComments(data || [])
     setLoading(false)
+    if (onLoadComplete) onLoadComplete()
   }
 
   useEffect(() => { loadComments() }, [type, gameId])
@@ -699,7 +723,7 @@ export default function CommentSection({ type, gameId, isAdmin = false, isPrevie
       <TranslateAllWrap>
         <TranslateAllBtn onClick={translateAllComments}>
           {translateAllLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : null}
-          {translateAllLoading ? t('comment.translating_all') : (comments.length > 0 && comments.every(c => showTranslatedIds[c.id]) ? t('comment.show_original_all') : t('comment.translate_all'))}
+          {translateAllLoading ? t('comment.translating_all') : (isAutoTranslate ? t('comment.show_original_all') : t('comment.translate_all'))}
         </TranslateAllBtn>
       </TranslateAllWrap>
 

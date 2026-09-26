@@ -275,6 +275,15 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     if (aiPreview.recommended_requirements) setRecAbout(aiPreview.recommended_requirements)
     if (aiPreview.platforms && Array.isArray(aiPreview.platforms) && aiPreview.platforms.length > 0) {
       setPlatforms(aiPreview.platforms)
+      // Auto-set download link platform: if game is NOT on windows, pick emulator type
+      const hasWindows = aiPreview.platforms.includes('windows')
+      if (!hasWindows) {
+        const consolePriority = ['ps4', 'ps5', 'ps3', 'ps2', 'switch', 'xbox']
+        const mainConsole = consolePriority.find((c: string) => aiPreview.platforms.includes(c))
+        if (mainConsole) {
+          setLinks(prev => prev.map(l => ({ ...l, platform: `emul-${mainConsole}` })))
+        }
+      }
     }
 
     // Fetch real images from SteamGridDB (primary) then fallback to Steam CDN
@@ -312,6 +321,21 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     } else if (aiPreview.cover_image) {
       setCoverImage(aiPreview.cover_image)
     }
+
+    // Fetch real YouTube trailer instead of relying on AI hallucination
+    let realTrailer = aiPreview.video_url || ''
+    try {
+      const searchQ = encodeURIComponent(`${gameName} Trailer PS4 PC PS5`)
+      const ytUrl = `https://www.youtube.com/results?search_query=${searchQ}`
+      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(ytUrl)}`)
+      const data = await res.json()
+      const match = data.contents?.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)
+      if (match && match[1]) {
+        realTrailer = `https://www.youtube.com/watch?v=${match[1]}`
+      }
+    } catch (err) { console.error('YT Fetch Error', err) }
+    
+    if (realTrailer) setVideoUrl(realTrailer)
 
     if (steamScreenshots.length > 0) {
       setScreenshots(steamScreenshots)
@@ -364,15 +388,16 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         setRecAbout(sr.recommended?.about || '')
       }
       const parsedLinks = (dl as any)?.length ? (dl as any).map((link: any) => {
-        let platform = 'windows';
+        let platform = link.platform || 'windows';
         let cloud_name = link.cloud_name;
-        if (cloud_name.startsWith('[windows] ')) {
-          platform = 'windows';
-          cloud_name = cloud_name.replace('[windows] ', '');
-        } else if (cloud_name.startsWith('[macos] ')) {
-          platform = 'macos';
-          cloud_name = cloud_name.replace('[macos] ', '');
+        
+        // Extract legacy platform tags like "[windows] Google Drive" or "[emul-ps2] Localhost"
+        const match = cloud_name.match(/^\[(.*?)\]\s*(.*)$/)
+        if (match) {
+          platform = match[1]
+          cloud_name = match[2]
         }
+        
         return { ...link, platform, cloud_name };
       }) : [{ cloud_name: 'Google Drive', url: '', platform: 'windows' }];
       setLinks(parsedLinks)
@@ -383,33 +408,58 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
 
   const addLink = () => setLinks(l => [...l, { cloud_name: 'Google Drive', url: '', platform: 'windows' }])
   const removeLink = (i: number) => setLinks(l => l.filter((_, idx) => idx !== i))
+  const detectCloudName = (url: string): string => {
+    const u = url.toLowerCase()
+    if (u.includes('mega.nz') || u.includes('mega.co.nz')) return 'MEGA'
+    if (u.includes('1fichier.')) return '1Fichier'
+    if (u.includes('pixeldrain.')) return 'Pixeldrain'
+    if (u.includes('mediafire.')) return 'MediaFire'
+    if (u.includes('gofile.io')) return 'Gofile'
+    if (u.includes('ranoz.')) return 'Ranoz'
+    if (u.includes('dropbox.')) return 'Dropbox'
+    if (u.includes('bowfile.')) return 'Bowfile'
+    if (u.includes('frdl.')) return 'FRDL'
+    if (u.includes('wdfiles.')) return 'WDFiles'
+    if (u.includes('mxdrop.')) return 'MXDrop'
+    if (u.includes('chomikuj.')) return 'Chomikuj'
+    if (u.includes('vikingfile.')) return 'VikingFile'
+    if (u.includes('hexload.')) return 'Hexload'
+    if (u.includes('1cloudfile.')) return '1CloudFile'
+    if (u.includes('usersdrive.')) return 'UsersDrive'
+    if (u.includes('megaup.')) return 'MegaUp'
+    if (u.includes('dailyuploads.')) return 'DailyUploads'
+    if (u.includes('ddownload.')) return 'DDownload'
+    if (u.includes('turbobit.')) return 'Turbobit'
+    if (u.includes('nitroflare.')) return 'Nitroflare'
+    if (u.includes('hitfile.')) return 'Hitfile'
+    if (u.includes('multiup.')) return 'Multiup'
+    if (u.includes('qiwi.')) return 'QIWI'
+    if (u.includes('datanodes.')) return 'DataNodes'
+    if (u.includes('drive.google.com')) return 'Google Drive'
+    if (u.includes('1drv.ms') || u.includes('onedrive.live.')) return 'OneDrive'
+    if (u.includes('buzzheavier.')) return 'Buzzheavier'
+    if (u.includes('zippyshare.')) return 'Zippyshare'
+    if (u.includes('down.')) return 'Down'
+    // Fallback: extract readable domain name
+    try {
+      const hostname = new URL(url).hostname.replace('www.', '')
+      const parts = hostname.split('.')
+      return parts[0].charAt(0).toUpperCase() + parts[0].slice(1)
+    } catch { return '' }
+  }
+
   const updateLink = (i: number, field: keyof LinkItem, val: string) => {
     setLinks(l => l.map((item, idx) => {
       if (idx !== i) return item
       const updatedItem = { ...item, [field]: val }
-      if (field === 'url' && val) {
-        const lowerUrl = val.toLowerCase()
-        let detected = ''
-        if (lowerUrl.includes('1fichier.')) detected = '1fichier'
-        else if (lowerUrl.includes('buzzheavier.')) detected = 'Buzzheavier'
-        else if (lowerUrl.includes('datanodes.')) detected = 'DataNodes'
-        else if (lowerUrl.includes('dropbox.')) detected = 'Dropbox'
-        else if (lowerUrl.includes('gofile.io')) detected = 'Gofile'
-        else if (lowerUrl.includes('drive.google.com')) detected = 'Google Drive'
-        else if (lowerUrl.includes('hitfile.')) detected = 'Hitfile'
-        else if (lowerUrl.includes('mega.nz')) detected = 'MEGA'
-        else if (lowerUrl.includes('mediafire.')) detected = 'MediaFire'
-        else if (lowerUrl.includes('multiup.')) detected = 'Multiup'
-        else if (lowerUrl.includes('1drv.ms') || lowerUrl.includes('onedrive.')) detected = 'OneDrive'
-        else if (lowerUrl.includes('pixeldrain.')) detected = 'Pixeldrain'
-        else if (lowerUrl.includes('turbobit.')) detected = 'Turbobit'
-        else if (lowerUrl.includes('zippyshare.')) detected = 'Zippyshare'
-        
+      if (field === 'url' && val.trim()) {
+        const detected = detectCloudName(val.trim())
         if (detected) updatedItem.cloud_name = detected
       }
       return updatedItem
     }))
   }
+
 
   const handleSave = async () => {
     if (!title.trim() || !id) return
@@ -720,9 +770,19 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         <SectionLabel>☁️ Download Links</SectionLabel>
         {links.map((link, i) => (
           <LinkRow key={i}>
-            <Select value={link.platform || 'windows'} onChange={e => updateLink(i, 'platform', e.target.value)} style={{ width: 110, padding: '9px 12px' }}>
-              <option value="windows">Windows</option>
-              <option value="macos">macOS</option>
+            <Select value={link.platform || 'windows'} onChange={e => updateLink(i, 'platform', e.target.value)} style={{ width: 130, padding: '9px 10px', fontSize: 12 }}>
+              <optgroup label="🖥️ PC">
+                <option value="windows">Windows</option>
+                <option value="macos">macOS</option>
+              </optgroup>
+              <optgroup label="🕹️ Emulator">
+                <option value="emul-ps2">Emul: PS2</option>
+                <option value="emul-ps3">Emul: PS3</option>
+                <option value="emul-ps4">Emul: PS4</option>
+                <option value="emul-ps5">Emul: PS5</option>
+                <option value="emul-switch">Emul: Switch</option>
+                <option value="emul-xbox">Emul: Xbox</option>
+              </optgroup>
             </Select>
             <Input
               list="cloud-options"

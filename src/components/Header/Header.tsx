@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import type { Game } from '../../lib/supabase'
 import LanguageSwitcher from '../LanguageSwitcher/LanguageSwitcher'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
+import { clearRestoreFlag } from '../../hooks/useScrollRestore'
 
 // ── Styled Components ──────────────────────────────────────────────────
 const HeaderWrap = styled.header`
@@ -474,7 +475,7 @@ export default function Header() {
           </Logo>
 
           <NavLinks>
-            <NavLink to="/" $active={location.pathname === '/'}>{t('nav.home')}</NavLink>
+            <NavLink to="/" $active={location.pathname === '/'} onClick={() => clearRestoreFlag('/')}>{t('nav.home')}</NavLink>
 
             {/* A-Z Dropdown */}
             <div ref={azRef} style={{ position: 'relative' }}>
@@ -488,27 +489,27 @@ export default function Header() {
                   <p style={{ fontSize: 11, color: 'rgba(148,163,184,0.6)', marginBottom: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('nav.browse_az')}</p>
                   <AZGrid>
                     {AZ_LETTERS.map(l => (
-                      <AZBtn key={l} to={`/az-filter?letter=${l}`}>{l}</AZBtn>
+                      <AZBtn key={l} to={`/az-filter?letter=${l}`} onClick={() => clearRestoreFlag('/az-filter')}>{l}</AZBtn>
                     ))}
                   </AZGrid>
                   <div style={{ marginTop: 10, borderTop: '1px solid rgba(124,58,237,0.15)', paddingTop: 10 }}>
-                    <NavLink to="/az-filter" style={{ fontSize: 13 }}>{t('nav.view_all_az')}</NavLink>
+                    <NavLink to="/az-filter" style={{ fontSize: 13 }} onClick={() => clearRestoreFlag('/az-filter')}>{t('nav.view_all_az')}</NavLink>
                   </div>
                 </Dropdown>
               )}
             </div>
 
-            <NavLink to="/top-games" $active={isActive('/top-games')}>
+            <NavLink to="/top-games" $active={isActive('/top-games')} onClick={() => clearRestoreFlag('/top-games')}>
               <Trophy size={15} />
               {t('nav.top_games')}
             </NavLink>
 
-            <NavLink to="/comments" $active={isActive('/comments')}>
+            <NavLink to="/comments" $active={isActive('/comments')} onClick={() => clearRestoreFlag('/comments')}>
               <MessageSquare size={15} />
               {t('nav.guestbook')}
             </NavLink>
 
-            <NavLink to="/coming-soon" $active={isActive('/coming-soon')} style={{ color: isActive('/coming-soon') ? '#fbbf24' : 'rgba(251,191,36,0.8)', borderRadius: 8, background: isActive('/coming-soon') ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.06)' }}>
+            <NavLink to="/coming-soon" $active={isActive('/coming-soon')} onClick={() => clearRestoreFlag('/coming-soon')} style={{ color: isActive('/coming-soon') ? '#fbbf24' : 'rgba(251,191,36,0.8)', borderRadius: 8, background: isActive('/coming-soon') ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.06)' }}>
               🚀 Coming Soon
             </NavLink>
           </NavLinks>
@@ -567,10 +568,10 @@ export default function Header() {
 
       {/* Mobile Menu */}
       < MobileMenu $open={mobileOpen} >
-        <MobileLink to="/">🏠 Home</MobileLink>
-        <MobileLink to="/az-filter">🔤 A-Z Filter</MobileLink>
-        <MobileLink to="/top-games">🏆 Top PC Games</MobileLink>
-        <MobileLink to="/comments">💬 Guestbook</MobileLink>
+        <MobileLink to="/" onClick={() => clearRestoreFlag('/')}>🏠 Home</MobileLink>
+        <MobileLink to="/az-filter" onClick={() => clearRestoreFlag('/az-filter')}>🔤 A-Z Filter</MobileLink>
+        <MobileLink to="/top-games" onClick={() => clearRestoreFlag('/top-games')}>🏆 Top PC Games</MobileLink>
+        <MobileLink to="/comments" onClick={() => clearRestoreFlag('/comments')}>💬 Guestbook</MobileLink>
         <MobileLink to="/coming-soon" style={{ color: '#fbbf24', background: 'rgba(251,191,36,0.06)' }}>🚀 Coming Soon &amp; Free Games</MobileLink>
         <div style={{ padding: '8px 0' }}>
           <p style={{ fontSize: 12, color: 'rgba(148,163,184,0.5)', padding: '8px 16px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Browse A-Z</p>

@@ -21,6 +21,24 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://example.com/game/devil-may-cry-53</loc>
+    <lastmod>2026-09-26T17:56:39.275Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/devil-may-cry-hd-collection</loc>
+    <lastmod>2026-09-26T17:48:07.760Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/devil-may-cry-4</loc>
+    <lastmod>2026-09-26T17:47:28.930Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://example.com/game/metal-gear-solid-v-the-phantom-pain</loc>
     <lastmod>2026-09-26T16:54:09.579Z</lastmod>
     <changefreq>weekly</changefreq>
@@ -69,20 +87,8 @@
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://example.com/game/devil-may-cry-4</loc>
-    <lastmod>2026-09-26T16:12:22.989Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
     <loc>https://example.com/game/devil-may-cry-3-dante-s-awakening-special-edition</loc>
     <lastmod>2026-09-26T16:11:26.460Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://example.com/game/devil-may-cry-hd-collection</loc>
-    <lastmod>2026-09-26T16:09:59.470Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
