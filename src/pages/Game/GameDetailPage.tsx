@@ -297,237 +297,237 @@ export default function GameDetailPage() {
       <Page>
         <Back to="/"><ArrowLeft size={15} /> {t('game.back')}</Back>
 
-      <Hero>
-        <div>
-          {game.cover_image
-            ? <CoverImg src={game.cover_image} alt={game.title} />
-            : <CoverPlaceholder>🎮</CoverPlaceholder>
-          }
-        </div>
+        <Hero>
+          <div>
+            {game.cover_image
+              ? <CoverImg src={game.cover_image} alt={game.title} />
+              : <CoverPlaceholder>🎮</CoverPlaceholder>
+            }
+          </div>
 
-        <Info>
-          {gameCategories.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-              {gameCategories.map(c => <CategoryBadge key={c.id}>{translateCategoryName(c.name)}</CategoryBadge>)}
-            </div>
-          )}
-          <Title>{game.title}</Title>
-          {(game as any).is_coming_soon && (
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              background: 'linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1))',
-              border: '1px solid rgba(251,191,36,0.4)',
-              borderRadius: 8, padding: '6px 14px', marginBottom: 14,
-              fontSize: 13, fontWeight: 700, color: '#fbbf24',
-              letterSpacing: '0.5px', textTransform: 'uppercase',
-              boxShadow: '0 0 20px rgba(251,191,36,0.15)'
-            }}>
-              🚀 Coming Soon
-            </div>
-          )}
-          {(game as any).file_size && (
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)',
-              borderRadius: 8, padding: '6px 12px', marginBottom: 14, fontSize: 13, color: '#c4b5fd'
-            }}>
-              💾 <strong>{t('game.storage')}:</strong>&nbsp;{(game as any).file_size}
-            </div>
-          )}
-          {/* Short description preview */}
-          {game.description && <Description translate="yes">{game.description.slice(0, 400)}{game.description.length > 400 ? '...' : ''}</Description>}
+          <Info>
+            {gameCategories.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {gameCategories.map(c => <CategoryBadge key={c.id}>{translateCategoryName(c.name)}</CategoryBadge>)}
+              </div>
+            )}
+            <Title>{game.title}</Title>
+            {(game as any).is_coming_soon && (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: 'linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1))',
+                border: '1px solid rgba(251,191,36,0.4)',
+                borderRadius: 8, padding: '6px 14px', marginBottom: 14,
+                fontSize: 13, fontWeight: 700, color: '#fbbf24',
+                letterSpacing: '0.5px', textTransform: 'uppercase',
+                boxShadow: '0 0 20px rgba(251,191,36,0.15)'
+              }}>
+                🚀 Coming Soon
+              </div>
+            )}
+            {(game as any).file_size && (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)',
+                borderRadius: 8, padding: '6px 12px', marginBottom: 14, fontSize: 13, color: '#c4b5fd'
+              }}>
+                💾 <strong>{t('game.storage')}:</strong>&nbsp;{(game as any).file_size}
+              </div>
+            )}
+            {/* Short description preview */}
+            {game.description && <Description translate="yes">{game.description.slice(0, 400)}{game.description.length > 400 ? '...' : ''}</Description>}
 
-          {/* Download Links */}
-          <SectionTitle><Download size={15} /> {t('game.download_links')}</SectionTitle>
-          {(game as any).is_coming_soon ? (
-            <ComingSoonBadge>
-              <div style={{ fontSize: 36 }}>🚀</div>
-              <ComingSoonTitle>Coming Soon</ComingSoonTitle>
-              <ComingSoonSub>
-                เกมนี้กำลังจะเปิดให้ดาวน์โหลดเร็วๆ นี้<br />
-                โปรดติดตามและรอได้เลย!
-              </ComingSoonSub>
-            </ComingSoonBadge>
-          ) : links.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'rgba(148,163,184,0.5)' }}>{t('game.no_download')}</p>
-          ) : (
-            (() => {
-              const winLinks: DownloadLink[] = []
-              const macLinks: DownloadLink[] = []
+            {/* Download Links */}
+            <SectionTitle><Download size={15} /> {t('game.download_links')}</SectionTitle>
+            {(game as any).is_coming_soon ? (
+              <ComingSoonBadge>
+                <div style={{ fontSize: 36 }}>🚀</div>
+                <ComingSoonTitle>Coming Soon</ComingSoonTitle>
+                <ComingSoonSub>
+                  เกมนี้กำลังจะเปิดให้ดาวน์โหลดเร็วๆ นี้<br />
+                  โปรดติดตามและรอได้เลย!
+                </ComingSoonSub>
+              </ComingSoonBadge>
+            ) : links.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'rgba(148,163,184,0.5)' }}>{t('game.no_download')}</p>
+            ) : (
+              (() => {
+                const winLinks: DownloadLink[] = []
+                const macLinks: DownloadLink[] = []
 
-              links.forEach(link => {
-                let platform = 'windows';
-                let cloud_name = link.cloud_name;
-                if (cloud_name.startsWith('[windows] ')) {
-                  platform = 'windows';
-                  cloud_name = cloud_name.replace('[windows] ', '');
-                } else if (cloud_name.startsWith('[macos] ')) {
-                  platform = 'macos';
-                  cloud_name = cloud_name.replace('[macos] ', '');
-                }
+                links.forEach(link => {
+                  let platform = 'windows';
+                  let cloud_name = link.cloud_name;
+                  if (cloud_name.startsWith('[windows] ')) {
+                    platform = 'windows';
+                    cloud_name = cloud_name.replace('[windows] ', '');
+                  } else if (cloud_name.startsWith('[macos] ')) {
+                    platform = 'macos';
+                    cloud_name = cloud_name.replace('[macos] ', '');
+                  }
 
-                const parsedLink = { ...link, cloud_name };
-                if (platform === 'windows') winLinks.push(parsedLink);
-                else macLinks.push(parsedLink);
-              });
+                  const parsedLink = { ...link, cloud_name };
+                  if (platform === 'windows') winLinks.push(parsedLink);
+                  else macLinks.push(parsedLink);
+                });
 
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                  {winLinks.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(148,163,184,0.7)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Monitor size={14} /> {t('game.windows')}
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                    {winLinks.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(148,163,184,0.7)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Monitor size={14} /> {t('game.windows')} - Version
+                        </div>
+                        {winLinks.map(link => (
+                          <DownloadBtn key={link.id} onClick={() => handleDownload(link)}>
+                            <span style={{ fontSize: 20 }}>{CLOUD_ICONS[link.cloud_name] || CLOUD_ICONS.default}</span>
+                            <CloudName>{link.cloud_name}</CloudName>
+                            <DownArrow><ExternalLink size={12} /> {t('game.download')}</DownArrow>
+                          </DownloadBtn>
+                        ))}
                       </div>
-                      {winLinks.map(link => (
-                        <DownloadBtn key={link.id} onClick={() => handleDownload(link)}>
-                          <span style={{ fontSize: 20 }}>{CLOUD_ICONS[link.cloud_name] || CLOUD_ICONS.default}</span>
-                          <CloudName>{link.cloud_name}</CloudName>
-                          <DownArrow><ExternalLink size={12} /> {t('game.download')}</DownArrow>
-                        </DownloadBtn>
-                      ))}
-                    </div>
-                  )}
-                  {macLinks.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(148,163,184,0.7)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Apple size={14} /> {t('game.macos')}
+                    )}
+                    {macLinks.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(148,163,184,0.7)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Apple size={14} /> {t('game.macos')}
+                        </div>
+                        {macLinks.map(link => (
+                          <DownloadBtn key={link.id} onClick={() => handleDownload(link)}>
+                            <span style={{ fontSize: 20 }}>{CLOUD_ICONS[link.cloud_name] || CLOUD_ICONS.default}</span>
+                            <CloudName>{link.cloud_name}</CloudName>
+                            <DownArrow><ExternalLink size={12} /> Download</DownArrow>
+                          </DownloadBtn>
+                        ))}
                       </div>
-                      {macLinks.map(link => (
-                        <DownloadBtn key={link.id} onClick={() => handleDownload(link)}>
-                          <span style={{ fontSize: 20 }}>{CLOUD_ICONS[link.cloud_name] || CLOUD_ICONS.default}</span>
-                          <CloudName>{link.cloud_name}</CloudName>
-                          <DownArrow><ExternalLink size={12} /> Download</DownArrow>
-                        </DownloadBtn>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })()
-          )}
-        </Info>
-      </Hero>
+                    )}
+                  </div>
+                )
+              })()
+            )}
+          </Info>
+        </Hero>
 
-      {/* Video Trailer */}
-      {game.video_url && getYoutubeId(game.video_url) && (
-        <Section>
-          <SectionTitle><Play size={15} /> {t('game.trailer')}</SectionTitle>
-          <div style={{ width: '100%', aspectRatio: '16/9', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
-            <iframe
-              width="100%" height="100%"
-              src={`https://www.youtube.com/embed/${getYoutubeId(game.video_url)}`}
-              frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen
+        {/* Video Trailer */}
+        {game.video_url && getYoutubeId(game.video_url) && (
+          <Section>
+            <SectionTitle><Play size={15} /> {t('game.trailer')}</SectionTitle>
+            <div style={{ width: '100%', aspectRatio: '16/9', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+              <iframe
+                width="100%" height="100%"
+                src={`https://www.youtube.com/embed/${getYoutubeId(game.video_url)}`}
+                frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen
+              />
+            </div>
+          </Section>
+        )}
+
+        {/* Screenshots */}
+        {game.screenshots?.length > 0 && (
+          <Section>
+            <SectionTitle>📸 {t('game.screenshots')}</SectionTitle>
+            <GalleryWrap>
+              <GalleryScroll>
+                {game.screenshots.map((src, i) => (
+                  <Screenshot key={i} src={src} alt={`Screenshot ${i + 1}`} onClick={() => setLightbox(i)} />
+                ))}
+              </GalleryScroll>
+            </GalleryWrap>
+          </Section>
+        )}
+
+        {/* System Requirements */}
+        {sr && (
+          <Section translate="yes" key={`sysreq-${locale}`}>
+            <SectionTitle>
+              <Monitor size={15} /> {t('game.system_requirements')}
+              {isTranslating ? (
+                <span style={{ marginLeft: '12px', fontSize: 11, color: '#7c3aed', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', animation: 'pulse 1.5s infinite' }}>
+                  {locale === 'th' ? 'กำลังแปลภาษา...' : locale === 'lo' ? 'ກຳລັງແປພາສາ...' : 'Translating...'}
+                </span>
+              ) : locale !== 'en' ? (
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(124,58,237,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <Languages size={12} /> Google Translate
+                </span>
+              ) : null}
+            </SectionTitle>
+            <SpecGrid>
+              <SpecCard>
+                <SpecTitle><Cpu size={12} /> {t('game.minimum')}</SpecTitle>
+                {sr.minimum?.about && <div style={{ fontSize: 14, color: 'rgba(226,232,240,0.9)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{sr.minimum.about}</div>}
+              </SpecCard>
+              <SpecCard>
+                <SpecTitle><Cpu size={12} /> {t('game.recommended')}</SpecTitle>
+                {sr.recommended?.about && <div style={{ fontSize: 14, color: 'rgba(226,232,240,0.9)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{sr.recommended.about}</div>}
+              </SpecCard>
+            </SpecGrid>
+          </Section>
+        )}
+
+        {/* PC Spec Checker */}
+        {game && <PCSpecChecker game={game} />}
+
+        {/* Full Description */}
+        {game.description && (
+          <Section translate="yes" key={`desc-${locale}`}>
+            <SectionTitle>
+              <AlignLeft size={15} /> {t('game.about')}
+              {isTranslating ? (
+                <span style={{ marginLeft: '12px', fontSize: 11, color: '#7c3aed', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', animation: 'pulse 1.5s infinite' }}>
+                  {locale === 'th' ? 'กำลังแปลภาษา...' : locale === 'lo' ? 'ກຳລັງແປພາສາ...' : 'Translating...'}
+                </span>
+              ) : locale !== 'en' ? (
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(124,58,237,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <Languages size={12} /> Google Translate
+                </span>
+              ) : null}
+            </SectionTitle>
+            <div style={{
+              fontSize: 15, color: 'rgba(226,232,240,0.9)', lineHeight: 1.8, whiteSpace: 'pre-wrap',
+              background: 'rgba(18,18,31,0.8)', border: '1px solid rgba(124,58,237,0.15)',
+              borderRadius: 16, padding: '24px 32px'
+            }}>
+              {game.description}
+            </div>
+          </Section>
+        )}
+
+        {/* Lightbox */}
+        {lightbox !== null && game.screenshots?.length > 0 && (
+          <Lightbox onClick={() => setLightbox(null)}>
+            <img
+              src={game.screenshots[lightbox]}
+              alt={`Screenshot ${lightbox + 1}`}
+              style={{ maxWidth: '90vw', maxHeight: '82vh', borderRadius: 12, boxShadow: '0 0 60px rgba(0,0,0,0.8)', display: 'block' }}
+              onClick={e => e.stopPropagation()}
             />
-          </div>
-        </Section>
-      )}
-
-      {/* Screenshots */}
-      {game.screenshots?.length > 0 && (
-        <Section>
-          <SectionTitle>📸 {t('game.screenshots')}</SectionTitle>
-          <GalleryWrap>
-            <GalleryScroll>
-              {game.screenshots.map((src, i) => (
-                <Screenshot key={i} src={src} alt={`Screenshot ${i + 1}`} onClick={() => setLightbox(i)} />
-              ))}
-            </GalleryScroll>
-          </GalleryWrap>
-        </Section>
-      )}
-
-      {/* System Requirements */}
-      {sr && (
-        <Section translate="yes" key={`sysreq-${locale}`}>
-          <SectionTitle>
-            <Monitor size={15} /> {t('game.system_requirements')}
-            {isTranslating ? (
-              <span style={{ marginLeft: '12px', fontSize: 11, color: '#7c3aed', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', animation: 'pulse 1.5s infinite' }}>
-                {locale === 'th' ? 'กำลังแปลภาษา...' : locale === 'lo' ? 'ກຳລັງແປພາສາ...' : 'Translating...'}
-              </span>
-            ) : locale !== 'en' ? (
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(124,58,237,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                <Languages size={12} /> Google Translate
-              </span>
-            ) : null}
-          </SectionTitle>
-          <SpecGrid>
-            <SpecCard>
-              <SpecTitle><Cpu size={12} /> {t('game.minimum')}</SpecTitle>
-              {sr.minimum?.about && <div style={{ fontSize: 14, color: 'rgba(226,232,240,0.9)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{sr.minimum.about}</div>}
-            </SpecCard>
-            <SpecCard>
-              <SpecTitle><Cpu size={12} /> {t('game.recommended')}</SpecTitle>
-              {sr.recommended?.about && <div style={{ fontSize: 14, color: 'rgba(226,232,240,0.9)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{sr.recommended.about}</div>}
-            </SpecCard>
-          </SpecGrid>
-        </Section>
-      )}
-
-      {/* PC Spec Checker */}
-      {game && <PCSpecChecker game={game} />}
-
-      {/* Full Description */}
-      {game.description && (
-        <Section translate="yes" key={`desc-${locale}`}>
-          <SectionTitle>
-            <AlignLeft size={15} /> {t('game.about')}
-            {isTranslating ? (
-              <span style={{ marginLeft: '12px', fontSize: 11, color: '#7c3aed', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', animation: 'pulse 1.5s infinite' }}>
-                {locale === 'th' ? 'กำลังแปลภาษา...' : locale === 'lo' ? 'ກຳລັງແປພາສາ...' : 'Translating...'}
-              </span>
-            ) : locale !== 'en' ? (
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(124,58,237,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                <Languages size={12} /> Google Translate
-              </span>
-            ) : null}
-          </SectionTitle>
-          <div style={{
-            fontSize: 15, color: 'rgba(226,232,240,0.9)', lineHeight: 1.8, whiteSpace: 'pre-wrap',
-            background: 'rgba(18,18,31,0.8)', border: '1px solid rgba(124,58,237,0.15)',
-            borderRadius: 16, padding: '24px 32px'
-          }}>
-            {game.description}
-          </div>
-        </Section>
-      )}
-
-      {/* Lightbox */}
-      {lightbox !== null && game.screenshots?.length > 0 && (
-        <Lightbox onClick={() => setLightbox(null)}>
-          <img
-            src={game.screenshots[lightbox]}
-            alt={`Screenshot ${lightbox + 1}`}
-            style={{ maxWidth: '90vw', maxHeight: '82vh', borderRadius: 12, boxShadow: '0 0 60px rgba(0,0,0,0.8)', display: 'block' }}
-            onClick={e => e.stopPropagation()}
-          />
-          {/* Prev */}
-          <LightboxNav
-            style={{ left: 16 }}
-            disabled={lightbox === 0}
-            onClick={e => { e.stopPropagation(); setLightbox(i => Math.max((i ?? 1) - 1, 0)) }}
-          >
-            <ChevronLeft size={26} />
-          </LightboxNav>
-          {/* Next */}
-          <LightboxNav
-            style={{ right: 16 }}
-            disabled={lightbox === game.screenshots.length - 1}
-            onClick={e => { e.stopPropagation(); setLightbox(i => Math.min((i ?? 0) + 1, game.screenshots.length - 1)) }}
-          >
-            <ChevronRight size={26} />
-          </LightboxNav>
-          {/* Counter */}
-          <LightboxCounter>{lightbox + 1} / {game.screenshots.length}</LightboxCounter>
-          {/* Close */}
-          <button
-            onClick={() => setLightbox(null)}
-            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 14, backdropFilter: 'blur(4px)' }}
-          >✕ Close</button>
-        </Lightbox>
-      )}
-      <CommentSection type="game" gameId={game.id} />
-    </Page>
+            {/* Prev */}
+            <LightboxNav
+              style={{ left: 16 }}
+              disabled={lightbox === 0}
+              onClick={e => { e.stopPropagation(); setLightbox(i => Math.max((i ?? 1) - 1, 0)) }}
+            >
+              <ChevronLeft size={26} />
+            </LightboxNav>
+            {/* Next */}
+            <LightboxNav
+              style={{ right: 16 }}
+              disabled={lightbox === game.screenshots.length - 1}
+              onClick={e => { e.stopPropagation(); setLightbox(i => Math.min((i ?? 0) + 1, game.screenshots.length - 1)) }}
+            >
+              <ChevronRight size={26} />
+            </LightboxNav>
+            {/* Counter */}
+            <LightboxCounter>{lightbox + 1} / {game.screenshots.length}</LightboxCounter>
+            {/* Close */}
+            <button
+              onClick={() => setLightbox(null)}
+              style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 14, backdropFilter: 'blur(4px)' }}
+            >✕ Close</button>
+          </Lightbox>
+        )}
+        <CommentSection type="game" gameId={game.id} />
+      </Page>
     </>
   )
 }

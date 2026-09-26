@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import styled, { keyframes } from 'styled-components'
-import { ArrowLeft, Save, Loader2, Plus, Minus, CheckCircle, AlertCircle, Image, X, Wand2, Sparkles, Bot, Edit2 } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, Plus, Minus, CheckCircle, AlertCircle, Image, X, Wand2, Sparkles, Bot, Edit2, Search } from 'lucide-react'
 import { supabase, uploadImage } from '../../../lib/supabase'
 import ScreenshotSorter from '../../../components/ScreenshotSorter/ScreenshotSorter'
 import type { Category } from '../../../lib/supabase'
@@ -242,7 +242,8 @@ export default function EditGame() {
   "description": "a 2-3 paragraph description of the game (plot, gameplay, features)",
   "genres": ["genre1", "genre2"] (list of genres e.g. Action, RPG, Strategy, Sports, Racing, Shooter, Adventure, Simulation, Horror, Puzzle, Fighting, Platform),
   "file_size": "estimated game size e.g. 50 GB, 120 GB, 500 MB (just the number and unit)",
-  "video_url": "YouTube trailer URL if available (optional)",
+  "platforms": ["windows", "macos", "ps2", "ps3", "ps4", "ps5", "switch", "xbox"] (list of platforms the game supports, must use exactly these lowercase IDs if applicable),
+  "video_url": "Accurate YouTube Game Trailer URL. MUST be a real, working watch URL. Priority: PS4 Trailer, then PS3 or PC Trailer.",
   "minimum_requirements": "OS: Windows 10 64-bit\\nCPU: Intel Core i5-8400\\nRAM: 8 GB\\nGPU: NVIDIA GTX 970",
   "recommended_requirements": "OS: Windows 10/11 64-bit\\nCPU: Intel Core i7-8700K\\nRAM: 16 GB\\nGPU: NVIDIA RTX 2080",
   "steam_app_id": 12120, // The numeric Steam App ID for the game (crucial for fetching real images, provide it if the game is on Steam)
@@ -272,6 +273,9 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     if (aiPreview.video_url) setVideoUrl(aiPreview.video_url)
     if (aiPreview.minimum_requirements) setMinAbout(aiPreview.minimum_requirements)
     if (aiPreview.recommended_requirements) setRecAbout(aiPreview.recommended_requirements)
+    if (aiPreview.platforms && Array.isArray(aiPreview.platforms) && aiPreview.platforms.length > 0) {
+      setPlatforms(aiPreview.platforms)
+    }
 
     // Fetch real images from SteamGridDB (primary) then fallback to Steam CDN
     let steamCover = ''
@@ -379,7 +383,33 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
 
   const addLink = () => setLinks(l => [...l, { cloud_name: 'Google Drive', url: '', platform: 'windows' }])
   const removeLink = (i: number) => setLinks(l => l.filter((_, idx) => idx !== i))
-  const updateLink = (i: number, field: keyof LinkItem, val: string) => setLinks(l => l.map((item, idx) => idx === i ? { ...item, [field]: val } : item))
+  const updateLink = (i: number, field: keyof LinkItem, val: string) => {
+    setLinks(l => l.map((item, idx) => {
+      if (idx !== i) return item
+      const updatedItem = { ...item, [field]: val }
+      if (field === 'url' && val) {
+        const lowerUrl = val.toLowerCase()
+        let detected = ''
+        if (lowerUrl.includes('1fichier.')) detected = '1fichier'
+        else if (lowerUrl.includes('buzzheavier.')) detected = 'Buzzheavier'
+        else if (lowerUrl.includes('datanodes.')) detected = 'DataNodes'
+        else if (lowerUrl.includes('dropbox.')) detected = 'Dropbox'
+        else if (lowerUrl.includes('gofile.io')) detected = 'Gofile'
+        else if (lowerUrl.includes('drive.google.com')) detected = 'Google Drive'
+        else if (lowerUrl.includes('hitfile.')) detected = 'Hitfile'
+        else if (lowerUrl.includes('mega.nz')) detected = 'MEGA'
+        else if (lowerUrl.includes('mediafire.')) detected = 'MediaFire'
+        else if (lowerUrl.includes('multiup.')) detected = 'Multiup'
+        else if (lowerUrl.includes('1drv.ms') || lowerUrl.includes('onedrive.')) detected = 'OneDrive'
+        else if (lowerUrl.includes('pixeldrain.')) detected = 'Pixeldrain'
+        else if (lowerUrl.includes('turbobit.')) detected = 'Turbobit'
+        else if (lowerUrl.includes('zippyshare.')) detected = 'Zippyshare'
+        
+        if (detected) updatedItem.cloud_name = detected
+      }
+      return updatedItem
+    }))
+  }
 
   const handleSave = async () => {
     if (!title.trim() || !id) return
@@ -514,7 +544,9 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
               </div>
               <AiResultRow><AiResultKey>🎮 Title</AiResultKey><AiResultVal>{aiPreview.title}</AiResultVal></AiResultRow>
               <AiResultRow><AiResultKey>🏷️ Genres</AiResultKey><AiResultVal>{(aiPreview.genres || []).join(', ')}</AiResultVal></AiResultRow>
+              <AiResultRow><AiResultKey>🕹️ Platform</AiResultKey><AiResultVal>{(aiPreview.platforms || []).join(', ').toUpperCase()}</AiResultVal></AiResultRow>
               <AiResultRow><AiResultKey>💾 Size</AiResultKey><AiResultVal>{aiPreview.file_size}</AiResultVal></AiResultRow>
+              <AiResultRow><AiResultKey>🎥 Video</AiResultKey><AiResultVal>{aiPreview.video_url || 'N/A'}</AiResultVal></AiResultRow>
               <AiResultRow><AiResultKey>📝 Desc</AiResultKey><AiResultVal style={{ maxHeight: 80, overflow: 'hidden', maskImage: 'linear-gradient(to bottom, black 60%, transparent)' }}>{aiPreview.description}</AiResultVal></AiResultRow>
               <AiResultRow><AiResultKey>💻 Min Req</AiResultKey><AiResultVal style={{ whiteSpace: 'pre-line', fontSize: 12 }}>{aiPreview.minimum_requirements}</AiResultVal></AiResultRow>
             </AiResultCard>
@@ -565,7 +597,27 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
           </FetchBtn>
         </div>
         <Field>
-          <Label>Video Trailer (YouTube URL)</Label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Label style={{ marginBottom: 0 }}>Video Trailer (YouTube URL)</Label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <FetchBtn type="button" onClick={() => {
+                if (!title) return alert('กรุณาใส่ชื่อเกมที่ช่อง Title ก่อน');
+                window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(title + ' Trailer PS3 PS4 PC Game')}`, '_blank');
+              }} style={{ padding: '6px 10px', fontSize: 12, background: 'rgba(220, 38, 38, 0.15)', border: '1px solid rgba(220, 38, 38, 0.4)', color: '#ef4444' }}>
+                <Search size={14} /> ค้นหา Trailer บน YouTube
+              </FetchBtn>
+              <FetchBtn type="button" onClick={async () => {
+                try {
+                  const text = await navigator.clipboard.readText();
+                  if (text) setVideoUrl(text);
+                } catch (err) {
+                  alert('ไม่สามารถอ่าน Clipboard ได้ กรุณากดวางเอง (Ctrl+V)');
+                }
+              }} style={{ padding: '6px 10px', fontSize: 12, background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4' }}>
+                📋 วาง URL
+              </FetchBtn>
+            </div>
+          </div>
           <Input placeholder="e.g. https://www.youtube.com/watch?v=..." value={videoUrl} onChange={e => setVideoUrl(e.target.value)} />
           {getYouTubeId(videoUrl) && (
             <div style={{ marginTop: 12, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(124,58,237,0.3)', background: '#000' }}>
@@ -642,21 +694,16 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         <SectionLabel>💻 System Requirements</SectionLabel>
         <Field>
           <Label>Supported Platforms</Label>
-          <div style={{ display: 'flex', gap: 16 }}>
-            <Label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 500, color: '#e2e8f0' }}>
-              <input type="checkbox" checked={platforms.includes('windows')} onChange={e => {
-                if (e.target.checked) setPlatforms(p => [...p, 'windows'])
-                else setPlatforms(p => p.filter(x => x !== 'windows'))
-              }} />
-              Windows
-            </Label>
-            <Label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 500, color: '#e2e8f0' }}>
-              <input type="checkbox" checked={platforms.includes('macos')} onChange={e => {
-                if (e.target.checked) setPlatforms(p => [...p, 'macos'])
-                else setPlatforms(p => p.filter(x => x !== 'macos'))
-              }} />
-              macOS
-            </Label>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {['windows', 'macos', 'ps2', 'ps3', 'ps4', 'ps5', 'switch', 'xbox'].map(plat => (
+              <Label key={plat} style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 500, color: '#e2e8f0', textTransform: plat === 'macos' ? 'none' : 'capitalize' }}>
+                <input type="checkbox" checked={platforms.includes(plat)} onChange={e => {
+                  if (e.target.checked) setPlatforms(p => [...p, plat])
+                  else setPlatforms(p => p.filter(x => x !== plat))
+                }} />
+                {plat === 'macos' ? 'macOS' : plat === 'ps2' ? 'PS2' : plat === 'ps3' ? 'PS3' : plat === 'ps4' ? 'PS4' : plat === 'ps5' ? 'PS5' : plat === 'switch' ? 'Switch' : plat === 'xbox' ? 'Xbox' : 'Windows'}
+              </Label>
+            ))}
           </div>
         </Field>
         <SpecGrid>
