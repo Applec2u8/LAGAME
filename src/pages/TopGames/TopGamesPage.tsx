@@ -17,8 +17,8 @@ export default function TopGamesPage() {
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Use universal scroll restore hook
-  useScrollRestore(!loading && games.length > 0)
+  // Scroll restore with explicit namespaced key — prevents cross-page collision
+  useScrollRestore('scroll_pos_top_games', !loading && games.length > 0)
 
   useEffect(() => {
     const fetchGames = async () => {

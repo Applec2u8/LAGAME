@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import styled, { keyframes } from 'styled-components'
-import { Sparkles, Plus, Minus, Save, ArrowLeft, Loader2, CheckCircle, AlertCircle, X, Image, Bot, Wand2, Gamepad2, Search } from 'lucide-react'
+import styled from 'styled-components'
+import { Plus, Minus, Save, ArrowLeft, Loader2, CheckCircle, AlertCircle, Image, Bot, Gamepad2, Search } from 'lucide-react'
+import AiAutoFillCard from '../../../components/AiAutoFill/AiAutoFillCard'
 import ScreenshotSorter from '../../../components/ScreenshotSorter/ScreenshotSorter'
 import { supabase } from '../../../lib/supabase'
 import type { Category } from '../../../lib/supabase'
@@ -21,21 +22,18 @@ const CLOUD_OPTIONS = ['1fichier', 'Buzzheavier', 'DataNodes', 'Dropbox', 'Gofil
 
 const FetchRow = styled.div`
   display: flex;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 8px;
   flex-wrap: wrap;
-  @media (max-width: 480px) { gap: 6px; }
+  align-items: center;
 `
 const FetchBtn = styled.button`
-  flex-shrink: 0; display: flex; align-items: center; gap: 6px;
-  padding: 10px 16px; background: linear-gradient(135deg, #7c3aed, #06b6d4);
-  border: none; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600;
+  flex-shrink: 0; display: flex; align-items: center; gap: 5px;
+  padding: 7px 11px; background: linear-gradient(135deg, #7c3aed, #06b6d4);
+  border: none; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600;
   cursor: pointer; white-space: nowrap; transition: opacity 0.2s;
   &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; }
-  @media (max-width: 480px) { padding: 10px 12px; font-size: 12px; }
 `
-
-
 
 const CoverPreview = styled.div`
   margin-top: 10px; width: 140px; height: 196px; border-radius: 8px; overflow: hidden;
@@ -44,19 +42,28 @@ const CoverPreview = styled.div`
 const CoverImg = styled.img`width: 100%; height: 100%; object-fit: cover;`
 
 const UploadBtn = styled.label`
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 14px; background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3);
-  border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 11px; background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3);
+  border-radius: 8px; color: #e2e8f0; font-size: 12px; font-weight: 600; cursor: pointer;
   white-space: nowrap; transition: all 0.2s;
   &:hover { background: rgba(124,58,237,0.3); }
   &.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
-  @media (max-width: 480px) { padding: 10px 12px; font-size: 12px; }
 `
 
 
 const LinkRow = styled.div`
-  display: flex; gap: 8px; margin-bottom: 8px; align-items: center;
-  @media (max-width: 480px) { flex-wrap: wrap; }
+  display: grid;
+  grid-template-columns: 130px 150px 1fr auto;
+  gap: 8px; margin-bottom: 12px; align-items: center;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 12px; padding: 8px;
+  @media (max-width: 640px) { 
+    grid-template-columns: 1fr 1fr;
+    padding: 12px;
+    & > :nth-child(3) { grid-column: 1 / -1; }
+    & > :nth-child(4) { grid-column: 1 / -1; justify-self: stretch; }
+  }
 `
 const AddLinkBtn = styled.button`
   display: flex; align-items: center; gap: 6px; padding: 8px 14px;
@@ -68,38 +75,7 @@ const AddLinkBtn = styled.button`
 const SpecGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px; @media(max-width:600px){grid-template-columns:1fr;}`
 const TwoColGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 16px; @media(max-width:600px){grid-template-columns:1fr; gap: 0;}`
 
-const AiBadge = styled.div`
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(6,182,212,0.15));
-  border: 1px solid rgba(124,58,237,0.3); border-radius: 999px;
-  font-size: 11px; font-weight: 700; color: #a855f7; text-transform: uppercase; letter-spacing: 0.5px;
-`
 
-const glowPulse = keyframes`
-  0%, 100% { box-shadow: 0 0 0 0 rgba(124,58,237,0.4), 0 0 20px rgba(124,58,237,0.1); }
-  50% { box-shadow: 0 0 0 4px rgba(124,58,237,0.1), 0 0 40px rgba(124,58,237,0.2); }
-`
-
-const AiGenerateBtn = styled.button<{ $loading?: boolean }>`
-  flex-shrink: 0; display: flex; align-items: center; gap: 8px;
-  padding: 11px 20px;
-  background: ${p => p.$loading ? 'rgba(124,58,237,0.3)' : 'linear-gradient(135deg, #7c3aed, #a855f7)'};
-  border: none; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 700;
-  cursor: ${p => p.$loading ? 'not-allowed' : 'pointer'};
-  white-space: nowrap; font-family: 'Noto Sans Lao', sans-serif;
-  transition: all 0.2s;
-  ${p => p.$loading ? '' : '&:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124,58,237,0.4); }'}
-  animation: ${p => p.$loading ? glowPulse : 'none'} 1.5s ease-in-out infinite;
-`
-
-const AiResultCard = styled.div`
-  margin-top: 14px; padding: 16px; background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(6,182,212,0.05));
-  border: 1px solid rgba(124,58,237,0.25); border-radius: 12px; font-size: 13px;
-  color: rgba(148,163,184,0.8);
-`
-const AiResultRow = styled.div`display: flex; gap: 8px; margin-bottom: 6px; align-items: flex-start;`
-const AiResultKey = styled.span`color: #a855f7; font-weight: 700; min-width: 90px; flex-shrink: 0;`
-const AiResultVal = styled.span`color: #e2e8f0; line-height: 1.5;`
 
 type LinkItem = { cloud_name: string; url: string; platform?: string }
 
@@ -144,6 +120,7 @@ export default function AddGame() {
   // Save state
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [steamAutoLoading, setSteamAutoLoading] = useState(false)
 
   // Upload state  — files are staged locally, uploaded only on Save
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
@@ -269,7 +246,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         realTrailer = `https://www.youtube.com/watch?v=${match[1]}`
       }
     } catch (err) { console.error('YT Fetch Error', err) }
-    
+
     if (realTrailer) setVideoUrl(realTrailer)
 
     if (steamScreenshots.length > 0) {
@@ -361,8 +338,45 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     if (newScreenshot.trim()) { setScreenshots(s => [...s, newScreenshot.trim()]); setNewScreenshot('') }
   }
 
-  const handleSteamFetchMedia = async () => {
-    const input = window.prompt('ใส่ Steam Store URL หรือ Steam App ID\n(เช่น 313690 หรือ https://store.steampowered.com/app/313690/...)')
+  const handleSteamAutoFetch = async () => {
+    if (!title.trim()) {
+      alert('กรุณากรอกชื่อเกมก่อน (Title) เพื่อใช้การค้นหาอัตโนมัติ')
+      return
+    }
+    setSteamAutoLoading(true)
+    try {
+      // 1. Search Steam to get App ID
+      const searchUrl = `https://store.steampowered.com/search/suggest?term=${encodeURIComponent(title)}&f=games&cc=US&realm=1&l=english`
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(searchUrl)}`
+      const searchRes = await fetch(proxyUrl)
+      const htmlText = await searchRes.text()
+
+      const match = htmlText.match(/data-ds-appid="(\d+)"/)
+      if (!match || !match[1]) {
+        alert('ไม่พบเกมในระบบ Steam จากชื่อเกมนี้ (กรุณาลองแบบกรอก URL เอง)')
+        setSteamAutoLoading(false)
+        return
+      }
+
+      const appId = match[1]
+      await processSteamAppId(appId)
+    } catch (err) {
+      console.error(err)
+      alert('ระบบดึงข้อมูลมีปัญหา กรุณาลองกรอก URL เอง')
+    }
+    setSteamAutoLoading(false)
+  }
+
+  const handleSteamSearchTab = () => {
+    if (title.trim()) {
+      window.open(`https://store.steampowered.com/search/?term=${encodeURIComponent(title)}`, '_blank')
+    } else {
+      window.open(`https://store.steampowered.com/`, '_blank')
+    }
+  }
+
+  const handleSteamManualFetch = async () => {
+    const input = window.prompt('ใส่ Steam Store URL หรือ Steam App ID\\n(เช่น 313690 หรือ https://store.steampowered.com/app/313690/...)')
     if (!input) return
     let appId = ''
     if (/^\d+$/.test(input.trim())) {
@@ -376,7 +390,10 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
       alert('ไม่พบ App ID กรุณาตรวจสอบ URL หรือ ID อีกครั้ง')
       return
     }
+    await processSteamAppId(appId)
+  }
 
+  const processSteamAppId = async (appId: string) => {
     try {
       const sgdbImages = await fetchSteamGridDbImages('', Number(appId))
       if (sgdbImages.cover) setCoverImage(sgdbImages.cover)
@@ -529,78 +546,12 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         {saveMsg && <Alert $type={saveMsg.type}>{saveMsg.type === 'success' ? <CheckCircle size={15} /> : <AlertCircle size={15} />}{saveMsg.text}</Alert>}
 
         {/* ── Gemini AI Auto-Fill ──────────────────────────────── */}
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <span style={{ margin: 0 }}><Bot size={15} /> AI Auto-Fill</span>
-            <AiBadge><Sparkles size={10} /> Powered by Gemini</AiBadge>
-          </div>
-          <p style={{ fontSize: 13, color: 'rgba(148,163,184,0.6)', marginBottom: 12, lineHeight: 1.6 }}>
-            พิมพ์ชื่อเกม แล้วกด <strong style={{ color: '#a855f7' }}>Generate</strong> — AI จะเติมข้อมูลทั้งหมดให้อัตโนมัติ (ชื่อ, คำอธิบาย, ประเภท, System Requirements)
-          </p>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <Input
-                placeholder="GTA V..."
-                value={aiQuery}
-                onChange={e => setAiQuery(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAiGenerate()}
-              />
-            </div>
-            <Select
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
-              style={{ width: 160, flexShrink: 0 }}
-            >
-              <option value="gemini-flash-latest">Flash (Latest)</option>
-              <option value="gemini-2.5-flash">2.5 Flash</option>
-              <option value="gemini-2.0-flash">2.0 Flash</option>
-              <option value="gemini-pro-latest">Pro (Latest)</option>
-            </Select>
-            <AiGenerateBtn $loading={aiLoading} onClick={handleAiGenerate} disabled={aiLoading || !aiQuery.trim()} style={{ flexShrink: 0 }}>
-              {aiLoading ? <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Wand2 size={16} />}
-              {aiLoading ? 'Generating...' : 'Generate'}
-            </AiGenerateBtn>
-          </div>
-
-          {aiError && (
-            <p style={{ fontSize: 12, color: '#ef4444', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              ⚠️ {aiError}
-            </p>
-          )}
-
-          {aiPreview && (
-            <AiResultCard>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#a855f7', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Sparkles size={11} /> AI Result Preview
-                </span>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={handleAiApply}
-                    disabled={isApplying}
-                    style={{ padding: '6px 16px', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 700, cursor: isApplying ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center', opacity: isApplying ? 0.7 : 1 }}
-                  >
-                    {isApplying ? <Loader2 size={13} style={{ animation: 'spin 0.8s linear infinite' }} /> : <CheckCircle size={13} />}
-                    {isApplying ? 'Applying...' : 'Apply to Form'}
-                  </button>
-                  <button
-                    onClick={() => setAiPreview(null)}
-                    style={{ padding: '6px 10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, color: '#ef4444', fontSize: 13, cursor: 'pointer' }}
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              </div>
-              <AiResultRow><AiResultKey>🎮 Title</AiResultKey><AiResultVal>{aiPreview.title}</AiResultVal></AiResultRow>
-              <AiResultRow><AiResultKey>🏷️ Genres</AiResultKey><AiResultVal>{(aiPreview.genres || []).join(', ')}</AiResultVal></AiResultRow>
-              <AiResultRow><AiResultKey>🕹️ Platform</AiResultKey><AiResultVal>{(aiPreview.platforms || []).join(', ').toUpperCase()}</AiResultVal></AiResultRow>
-              <AiResultRow><AiResultKey>💾 Size</AiResultKey><AiResultVal>{aiPreview.file_size}</AiResultVal></AiResultRow>
-              <AiResultRow><AiResultKey>🎥 Video</AiResultKey><AiResultVal>{aiPreview.video_url || 'N/A'}</AiResultVal></AiResultRow>
-              <AiResultRow><AiResultKey>📝 Desc</AiResultKey><AiResultVal style={{ maxHeight: 80, overflow: 'hidden', maskImage: 'linear-gradient(to bottom, black 60%, transparent)' }}>{aiPreview.description}</AiResultVal></AiResultRow>
-              <AiResultRow><AiResultKey>💻 Min Req</AiResultKey><AiResultVal style={{ whiteSpace: 'pre-line', fontSize: 12 }}>{aiPreview.minimum_requirements}</AiResultVal></AiResultRow>
-            </AiResultCard>
-          )}
-        </div>
+        <AiAutoFillCard
+          aiQuery={aiQuery} setAiQuery={setAiQuery}
+          selectedModel={selectedModel} setSelectedModel={setSelectedModel}
+          aiLoading={aiLoading} isApplying={isApplying} aiError={aiError} aiPreview={aiPreview}
+          onGenerate={handleAiGenerate} onApply={handleAiApply} onCancel={() => setAiPreview(null)}
+        />
 
         {/* ── Basic Info ─────────────────────────────── */}
         <SectionLabel>📋 Basic Info</SectionLabel>
@@ -644,21 +595,29 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         </Field>
 
         {/* ── Media (Cover, Screenshots & Video) ────── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <SectionLabel style={{ marginBottom: 0 }}><Image size={13} /> Media (Cover, Screenshots & Video)</SectionLabel>
-          <FetchBtn type="button" onClick={handleSteamFetchMedia} style={{ padding: '6px 12px', background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#a78bfa' }}>
-            <Bot size={14} /> ดึงรูปจาก Steam
-          </FetchBtn>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
+            <FetchBtn type="button" onClick={handleSteamAutoFetch} disabled={steamAutoLoading} style={{ padding: '6px 12px', background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#a78bfa', opacity: steamAutoLoading ? 0.6 : 1, flex: '1 1 auto', justifyContent: 'center' }}>
+              {steamAutoLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Bot size={14} />} ดึงรูปจาก Steam (Auto)
+            </FetchBtn>
+            <FetchBtn type="button" onClick={handleSteamSearchTab} style={{ padding: '6px 12px', background: 'rgba(236,72,153,0.2)', border: '1px solid rgba(236,72,153,0.4)', color: '#f472b6', flex: '1 1 auto', justifyContent: 'center' }}>
+              <Search size={14} /> ค้นหา (Manual)
+            </FetchBtn>
+            <FetchBtn type="button" onClick={handleSteamManualFetch} style={{ padding: '6px 12px', background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4', flex: '1 1 auto', justifyContent: 'center' }}>
+              📋 กรอก URL เอง
+            </FetchBtn>
+          </div>
         </div>
         <Field>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
             <Label style={{ marginBottom: 0 }}>Video Trailer (YouTube URL)</Label>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
               <FetchBtn type="button" onClick={() => {
                 if (!title) return alert('กรุณาใส่ชื่อเกมที่ช่อง Title ก่อน');
                 window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(title + ' Trailer PS3 PS4 PC Game')}`, '_blank');
-              }} style={{ padding: '6px 10px', fontSize: 12, background: 'rgba(220, 38, 38, 0.15)', border: '1px solid rgba(220, 38, 38, 0.4)', color: '#ef4444' }}>
-                <Search size={14} /> ค้นหา Trailer
+              }} style={{ padding: '6px 10px', fontSize: 12, background: 'rgba(220, 38, 38, 0.15)', border: '1px solid rgba(220, 38, 38, 0.4)', color: '#ef4444', flex: '1 1 auto', justifyContent: 'center' }}>
+                <Search size={14} /> ค้นหา Trailer บน YouTube
               </FetchBtn>
               <FetchBtn type="button" onClick={async () => {
                 try {
@@ -667,7 +626,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
                 } catch (err) {
                   alert('ไม่สามารถอ่าน Clipboard ได้ กรุณากดวางเอง (Ctrl+V)');
                 }
-              }} style={{ padding: '6px 10px', fontSize: 12, background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4' }}>
+              }} style={{ padding: '6px 10px', fontSize: 12, background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4', flex: '1 1 auto', justifyContent: 'center' }}>
                 📋 วาง URL
               </FetchBtn>
             </div>
@@ -727,19 +686,16 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         <Field>
           <Label>Screenshots (URL or Upload)</Label>
           <FetchRow>
-            <Input placeholder="Screenshot URL..." value={newScreenshot} onChange={e => setNewScreenshot(e.target.value)} onKeyDown={e => e.key === 'Enter' && addScreenshot()} style={{ flex: 1 }} />
+            <Input placeholder="Screenshot URL... (กด Enter เพื่อเพิ่ม)" value={newScreenshot} onChange={e => setNewScreenshot(e.target.value)} onKeyDown={e => e.key === 'Enter' && addScreenshot()} style={{ flex: 1 }} />
             <FetchBtn onClick={handlePasteScreenshot} style={{ padding: '10px 14px', background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4' }} title="วาง URL จาก Clipboard">
               📋 วาง
             </FetchBtn>
-            <FetchBtn onClick={addScreenshot} style={{ padding: '10px 14px' }}><Plus size={14} /> Add URL</FetchBtn>
-            <UploadBtn>
-              <Image size={14} /> เลือกไฟล์
-              <input type="file" accept="image/*" hidden multiple onChange={handleUploadScreenshot} />
-            </UploadBtn>
           </FetchRow>
-          {screenshots.length > 0 && (
-            <ScreenshotSorter screenshots={screenshots} onChange={setScreenshots} />
-          )}
+          <ScreenshotSorter
+            screenshots={screenshots}
+            onChange={setScreenshots}
+            onUpload={handleUploadScreenshot}
+          />
         </Field>
 
         {/* ── System Requirements ────────────────────── */}
@@ -773,7 +729,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         <SectionLabel>☁️ Download Links</SectionLabel>
         {links.map((link, i) => (
           <LinkRow key={i}>
-            <Select value={link.platform || 'windows'} onChange={e => updateLink(i, 'platform', e.target.value)} style={{ width: 130, padding: '9px 10px', fontSize: 12 }}>
+            <Select value={link.platform || 'windows'} onChange={e => updateLink(i, 'platform', e.target.value)} style={{ padding: '9px 10px', fontSize: 12 }}>
               <optgroup label="🖥️ PC">
                 <option value="windows">Windows</option>
                 <option value="macos">macOS</option>
@@ -792,12 +748,9 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
               value={link.cloud_name}
               onChange={e => updateLink(i, 'cloud_name', e.target.value)}
               placeholder="Select or type..."
-              style={{ width: 150, padding: '9px 12px' }}
             />
             <Input placeholder="https://..." value={link.url} onChange={e => updateLink(i, 'url', e.target.value)} />
-            {links.length > 1 && (
-              <IconBtn onClick={() => removeLink(i)}><Minus size={14} /></IconBtn>
-            )}
+            <IconBtn $danger onClick={() => removeLink(i)} style={{ opacity: links.length <= 1 ? 0.2 : 1 }} disabled={links.length <= 1}><Minus size={14} /></IconBtn>
           </LinkRow>
         ))}
         <datalist id="cloud-options">

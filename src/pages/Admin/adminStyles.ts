@@ -298,8 +298,8 @@ export const TogglePill = styled.button<{ $on: boolean }>`
 
 // ── Confirm Modal ─────────────────────────────────────────────────
 export const ModalOverlay = styled.div`
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center;
 `
 export const ModalCard = styled.div`
@@ -308,4 +308,5 @@ export const ModalCard = styled.div`
   border-radius: 20px; padding: 32px 28px; max-width: 380px;
   width: 90%; text-align: center;
   box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  position: relative;
 `

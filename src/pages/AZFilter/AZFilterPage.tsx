@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams, useLocation } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { useScrollRestore } from '../../hooks/useScrollRestore'
 import styled from 'styled-components'
 import { supabase } from '../../lib/supabase'
@@ -68,7 +68,6 @@ const PageBtn = styled.button<{ $active?: boolean }>`
 
 export default function AZFilterPage() {
   const { t } = useLanguage()
-  const location = useLocation()
   
   const [params, setParams] = useSearchParams()
   const activeLetter = params.get('letter') || 'All'
@@ -80,7 +79,7 @@ export default function AZFilterPage() {
   const [loading, setLoading] = useState(true)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  useScrollRestore(!loading && games.length > 0)
+  useScrollRestore('scroll_pos_az_filter', !loading && games.length > 0)
 
   useEffect(() => {
     fetchGames()
@@ -112,7 +111,7 @@ export default function AZFilterPage() {
 
   const handleLetterClick = (l: string) => {
     setLoading(true)
-    sessionStorage.removeItem(`scroll_${location.pathname}`)
+    sessionStorage.removeItem('scroll_pos_az_filter')
     setLocalQ('')
     setParams({ letter: l }) // page resets to 1 automatically (no page param)
     window.scrollTo({ top: 0, behavior: 'instant' })
@@ -120,7 +119,7 @@ export default function AZFilterPage() {
 
   const handleSearch = (val: string) => {
     setLoading(true)
-    sessionStorage.removeItem(`scroll_${location.pathname}`)
+    sessionStorage.removeItem('scroll_pos_az_filter')
     setLocalQ(val)
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
@@ -131,7 +130,7 @@ export default function AZFilterPage() {
 
   const handlePageChange = (p: number) => {
     setLoading(true)
-    sessionStorage.removeItem(`scroll_${location.pathname}`)
+    sessionStorage.removeItem('scroll_pos_az_filter')
     // Preserve existing letter/q params, update page
     const next = new URLSearchParams(params)
     if (p === 1) next.delete('page')

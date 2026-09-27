@@ -58,7 +58,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
 
   // Universal scroll restore
-  useScrollRestore(!loading && games.length > 0);
+  // Scroll restore with explicit namespaced key — prevents cross-page collision
+  useScrollRestore('scroll_pos_home', !loading && games.length > 0)
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
   const [comingSoonCount, setComingSoonCount] = useState(0)
   const [allGamesCount, setAllGamesCount] = useState(0)
@@ -74,9 +75,6 @@ export default function HomePage() {
 
   // Scroll-to-top visibility
   const [showScrollTop, setShowScrollTop] = useState(false)
-
-  // Restore scroll position after data load
-  useScrollRestore(!loading && games.length > 0)
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 

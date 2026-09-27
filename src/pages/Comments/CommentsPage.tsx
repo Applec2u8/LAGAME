@@ -27,7 +27,7 @@ const Sub = styled.p`
 export default function CommentsPage() {
   const { t } = useLanguage()
   const [loading, setLoading] = useState(true)
-  useScrollRestore(!loading)
+  useScrollRestore('scroll_pos_comments', !loading)
   
   const pageTitle = 'Guestbook & Reviews'
   const pageDescription = 'Read reviews and leave comments about your favorite free PC games on LA-GAME.'

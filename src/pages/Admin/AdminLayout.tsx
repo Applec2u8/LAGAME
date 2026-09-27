@@ -5,13 +5,14 @@ import { LayoutDashboard, Gamepad2, Tags, Megaphone, LogOut, Menu, X, Key, Messa
 import { useAdminAuth } from '../../context/AdminAuthContext'
 import { supabase } from '../../lib/supabase'
 
-const Shell = styled.div`display: flex; min-height: 100vh; background: #080810;`
+const Shell = styled.div`display: flex; height: 100vh; overflow: hidden; background: #080810;`
 
 const Sidebar = styled.aside<{ $open: boolean }>`
   width: 240px; flex-shrink: 0;
   background: rgba(12,12,22,0.95); backdrop-filter: blur(16px);
   border-right: 1px solid rgba(124,58,237,0.15);
   display: flex; flex-direction: column;
+  height: 100%; overflow-y: auto;
   @media (max-width: 768px) {
     position: fixed; left: ${p => p.$open ? '0' : '-240px'};
     top: 0; bottom: 0; z-index: 200; transition: left 0.25s ease;
@@ -64,7 +65,9 @@ const LogoutBtn = styled.button`
   &:hover { color: #ef4444; background: rgba(239,68,68,0.08); }
 `
 
-const Main = styled.main`flex: 1; overflow-x: hidden; display: flex; flex-direction: column;`
+const Main = styled.main`flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden;`
+
+const ScrollArea = styled.div`flex: 1; overflow-y: auto; overflow-x: hidden;`
 
 const TopBar = styled.div`
   height: 60px; background: rgba(12,12,22,0.8); backdrop-filter: blur(16px);
@@ -178,9 +181,11 @@ export default function AdminLayout() {
             <span style={{ fontSize: 16, color: '#e2e8f0', fontWeight: 600, letterSpacing: '0.5px' }}>Control Panel</span>
           </TopBarLeft>
         </TopBar>
-        <Content>
-          <Outlet />
-        </Content>
+        <ScrollArea>
+          <Content>
+            <Outlet />
+          </Content>
+        </ScrollArea>
       </Main>
     </Shell>
   )

@@ -97,7 +97,8 @@ export default function ComingSoonPage() {
     loadAll()
   }, [])
 
-  useScrollRestore(!localLoading && !epicLoading && !steamLoading && !epicGeneralLoading)
+  // Scroll restore: wait until ALL sections finish loading (explicit key prevents cross-page collision)
+  useScrollRestore('scroll_pos_coming_soon', !localLoading && !epicLoading && !steamLoading && !epicGeneralLoading)
 
   return (
     <>

@@ -3,6 +3,7 @@ import styled from 'styled-components'
 import { Download, Eye, Monitor, Apple } from 'lucide-react'
 import type { Game } from '../../lib/supabase'
 import { useCategoryTranslator } from '../../lib/i18n/CategoryTranslator'
+import { SCROLL_KEYS } from '../../hooks/useScrollRestore'
 
 const Card = styled(Link)`
   display: block;
@@ -141,6 +142,17 @@ const PlaceholderCover = styled.div`
   font-size: 48px;
 `
 
+// Module-level map: pathname → sessionStorage key used by useScrollRestore.
+// Defined outside the component to avoid recreation on every render.
+// MUST stay in sync with the storageKey arguments in each listing page.
+const PATHNAME_TO_SCROLL_KEY: Record<string, string> = {
+  '/': SCROLL_KEYS.HOME,
+  '/az-filter': SCROLL_KEYS.AZ_FILTER,
+  '/top-games': SCROLL_KEYS.TOP_GAMES,
+  '/coming-soon': SCROLL_KEYS.COMING_SOON,
+  '/comments': 'scroll_pos_comments',
+}
+
 type Props = {
   game: Game & { category?: { name: string }; download_links?: { id: string }[] }
   index?: number
@@ -148,8 +160,24 @@ type Props = {
 
 export default function GameCard({ game }: Props) {
   const { translateCategoryName } = useCategoryTranslator()
+
+  const saveScrollOnClick = () => {
+    const key = PATHNAME_TO_SCROLL_KEY[window.location.pathname]
+    if (key) {
+      const y = window.scrollY
+      // Save to sessionStorage (survives page refresh)
+      sessionStorage.setItem(key, String(y))
+      // Save to history.state (survives Back navigation — most reliable method)
+      // Preserves React Router's { key, usr } fields by spreading existing state.
+      try {
+        const prev = window.history.state ?? {}
+        window.history.replaceState({ ...prev, [key]: y }, '')
+      } catch (_) { /* ignore sandboxed iframe errors */ }
+    }
+  }
+
   return (
-    <Card to={`/game/${game.slug}`} onClick={() => sessionStorage.setItem(`scroll_${window.location.pathname}`, window.scrollY.toString())}>
+    <Card to={`/game/${game.slug}`} onClick={saveScrollOnClick}>
       <CoverWrap>
         {game.cover_image ? (
           <Cover src={game.cover_image} alt={game.title} loading="lazy" />
