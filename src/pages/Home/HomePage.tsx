@@ -20,7 +20,7 @@ import {
   CatBtn, Content, Toolbar, ToolbarLeft, ResultCount, SortSelect, Grid, EmptyState,
   Pagination, PageBtn, MobileFilterBtn, FilterBadge, Backdrop, Sheet, SheetHandle,
   SheetHeader, SheetTitle, SheetCloseBtn, SheetSection, SheetSectionTitle,
-  ChipsRow, OptionChip, MobileCatBtn, SheetApplyBtn, ScrollTopBtn
+  ChipsRow, OptionChip, MobileCatBtn, SheetApplyBtn, ScrollTopBtn, SheetScrollable, FloatingFooter
 } from './HomeStyles'
 
 const PAGE_SIZE = 100
@@ -367,6 +367,7 @@ export default function HomePage() {
             </SheetHeader>
 
             {/* Platform */}
+            <SheetScrollable>
             <SheetSection>
               <SheetSectionTitle>{t('home.platform')}</SheetSectionTitle>
               <ChipsRow>
@@ -418,10 +419,13 @@ export default function HomePage() {
                 </MobileCatBtn>
               ))}
             </SheetSection>
+            </SheetScrollable>
 
-            <SheetApplyBtn onClick={applySheet}>
-              {t('home.apply_filters')} {activeFilters > 0 ? `(${activeFilters} ${t('home.active')})` : ''}
-            </SheetApplyBtn>
+            <FloatingFooter $visible={tmpCat !== selectedCat || tmpPlatform !== selectedPlatform || tmpSort !== sort}>
+              <SheetApplyBtn onClick={applySheet}>
+                {t('home.apply_filters')} {activeFilters > 0 ? `(${activeFilters} ${t('home.active')})` : ''}
+              </SheetApplyBtn>
+            </FloatingFooter>
           </Sheet>
         </>
       )}

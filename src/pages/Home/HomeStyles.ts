@@ -1,4 +1,4 @@
-﻿import styled, { keyframes, css } from 'styled-components'
+import styled, { keyframes, css } from 'styled-components'
 
 export const Hero = styled.div`
   background: 
@@ -309,7 +309,8 @@ export const Sheet = styled.div<{ $closing: boolean }>`
   border-radius: 20px 20px 0 0;
   padding: 0 0 env(safe-area-inset-bottom, 16px);
   max-height: 88vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   animation: ${p => p.$closing ? css`${slideDown} 0.28s ease forwards` : css`${slideUp} 0.32s cubic-bezier(0.34,1.56,0.64,1) forwards`};
 `
 
@@ -413,9 +414,9 @@ export const MobileCatBtn = styled.button<{ $active: boolean }>`
 
 export const SheetApplyBtn = styled.button`
   display: block;
-  width: calc(100% - 40px);
-  margin: 4px 20px 20px;
+  width: 100%;
   padding: 14px;
+  margin-bottom: 10px;
   background: linear-gradient(135deg, #7c3aed, #06b6d4);
   border: none;
   border-radius: 12px;
@@ -426,6 +427,26 @@ export const SheetApplyBtn = styled.button`
   cursor: pointer;
   transition: opacity 0.2s;
   &:hover { opacity: 0.9; }
+`
+
+export const SheetScrollable = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 80px; /* Extra space so content isn't hidden behind the floating footer */
+`
+
+export const FloatingFooter = styled.div<{ $visible: boolean }>`
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px env(safe-area-inset-bottom, 16px);
+  background: rgba(15,15,31,0.9);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(124,58,237,0.2);
+  transform: ${p => p.$visible ? 'translateY(0)' : 'translateY(100%)'};
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 10;
 `
 
 /* ─── Rest of styles ────────────────────────────── */

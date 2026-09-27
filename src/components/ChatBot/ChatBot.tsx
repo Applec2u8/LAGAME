@@ -14,6 +14,7 @@ const pulse = keyframes`0%, 100% { box-shadow: 0 0 0 0 rgba(124,58,237,0.5); } 5
 const pulseRed = keyframes`0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.6; }`
 const typing = keyframes`0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-5px); opacity: 1; }`
 const spin = keyframes`to { transform: rotate(360deg); }`
+const shake = keyframes`0%,100%{transform:translateX(0)}15%{transform:translateX(-6px)}30%{transform:translateX(6px)}45%{transform:translateX(-4px)}60%{transform:translateX(4px)}75%{transform:translateX(-2px)}90%{transform:translateX(2px)}`
 
 // ── Types ─────────────────────────────────────────────────────────
 type AppMode = 'ai' | 'support'
@@ -174,16 +175,37 @@ const QuickBtn = styled.button`
   color: rgba(148,163,184,0.9); font-size: 12px; cursor: pointer; text-align: left; transition: all 0.15s;
   &:hover { background: rgba(124,58,237,0.2); color: #fff; border-color: rgba(124,58,237,0.4); }
 `
+const SupportChoiceBtn = styled.button`
+  display: flex; align-items: flex-start; gap: 0;
+  padding: 12px 14px; border-radius: 12px;
+  background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.15);
+  cursor: pointer; text-align: left; transition: all 0.15s;
+  width: 100%; flex-direction: column; gap: 4px;
+  &:hover { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.3); }
+`
+const ChoiceTitle = styled.span`
+  color: #c4b5fd; font-size: 13.5px; font-weight: 600; font-family: 'Noto Sans Lao', sans-serif;
+`
+const ChoiceDesc = styled.span`
+  color: rgba(148,163,184,0.7); font-size: 11.5px; font-family: 'Noto Sans Lao', sans-serif; line-height: 1.4;
+`
+
 const NameForm = styled.div`
   background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2);
   border-radius: 14px; padding: 20px; animation: ${fadeIn} 0.3s ease;
 `
-const NameInput = styled.input`
+const NameInput = styled.input<{ $shake?: boolean }>`
   width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(124,58,237,0.2);
   border-radius: 10px; color: #e2e8f0; font-size: 14px; padding: 10px 13px;
   font-family: 'Noto Sans Lao', sans-serif; outline: none; box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
   &::placeholder { color: rgba(148,163,184,0.4); }
   &:focus { border-color: rgba(124,58,237,0.5); }
+  ${p => p.$shake && css`
+    animation: ${shake} 0.5s ease;
+    border-color: rgba(239,68,68,0.7);
+    box-shadow: 0 0 0 2px rgba(239,68,68,0.25);
+  `}
 `
 
 // ── Input Area ────────────────────────────────────────────────────
@@ -192,7 +214,7 @@ const InputRow = styled.div`display: flex; gap: 8px; align-items: flex-end; posi
 const TextArea = styled.textarea`
   flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(124,58,237,0.2); border-radius: 12px;
   color: #e2e8f0; font-size: 13.5px; padding: 10px 13px; font-family: 'Noto Sans Lao', sans-serif;
-  resize: none; outline: none; max-height: 100px; min-height: 40px; transition: border-color 0.2s; line-height: 1.5;
+  resize: none; outline: none; max-height: 200px; min-height: 40px; transition: border-color 0.2s; line-height: 1.5;
   &::placeholder { color: rgba(148,163,184,0.4); }
   &:focus { border-color: rgba(124,58,237,0.5); box-shadow: 0 0 0 3px rgba(124,58,237,0.08); }
 `
@@ -322,6 +344,11 @@ export default function ChatBot() {
   const supportTextRef = useRef<HTMLTextAreaElement>(null)
   const realtimeRef = useRef<any>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const [nameInputShake, setNameInputShake] = useState(false)
+
+  // Detect mobile/touch device — pointer:coarse = finger/stylus (mobile/tablet), pointer:fine = mouse (desktop)
+  const isMobile = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
 
   // Localized quick questions
   const QUICK_QUESTIONS = [t('chat.quick_q1'), t('chat.quick_q2'), t('chat.quick_q3')]
@@ -450,20 +477,32 @@ export default function ChatBot() {
     subscribeSupport(session.id)
   }
 
-  const sendSupportMessage = async () => {
-    const content = supportInput.trim()
+  const sendSupportMessage = async (textParam?: string | React.MouseEvent | React.FormEvent) => {
+    const isText = typeof textParam === 'string'
+    const content = isText ? (textParam as string).trim() : supportInput.trim()
     if (!content && supportAttachments.length === 0) return
     if (supportSending) return
-    setSupportInput('')
     if (supportTextRef.current) supportTextRef.current.style.height = 'auto'
 
     if (supportPhase === 'naming' || !supportSessionId) {
       if (!content) { alert(t('chat.send_first_before_attach')); return }
+      // Require name before first send
+      if (!nameInput.trim()) {
+        setNameInputShake(true)
+        nameInputRef.current?.focus()
+        setTimeout(() => setNameInputShake(false), 600)
+        return
+      }
+      // Only clear input after validation passes
+      if (!isText) setSupportInput('')
       setSupportSending(true)
       await startSupportSession(content)
       setSupportSending(false)
       return
     }
+
+    // Normal chat phase
+    if (!isText) setSupportInput('')
 
     setSupportSending(true)
 
@@ -670,7 +709,7 @@ export default function ChatBot() {
       if (e.key === 'Enter') { e.preventDefault(); insertSupportMention(filteredGamesSupport[supportMentionIndex]); return }
       if (e.key === 'Escape') { e.preventDefault(); setSupportMentionQuery(null); return }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSupportMessage() }
+    if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); sendSupportMessage() }
   }
 
   // ── AI Actions ────────────────────────────────────────────────────
@@ -827,7 +866,17 @@ export default function ChatBot() {
     setAiLoading(false)
   }, [aiInput, aiMessages, aiLoading, gameCount, totalViews, aiAttachments, t])
 
-  const autoResize = (el: HTMLTextAreaElement) => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 100) + 'px' }
+  const autoResize = (el: HTMLTextAreaElement) => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px' }
+
+  // Auto-resize when supportInput is set programmatically (e.g. from choice buttons)
+  useEffect(() => {
+    if (!supportTextRef.current) return
+    const el = supportTextRef.current
+    requestAnimationFrame(() => {
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+    })
+  }, [supportInput])
 
   // ── @Mention Logic ──
   const filteredGames = useMemo(() => {
@@ -895,7 +944,7 @@ export default function ChatBot() {
       }
     }
     
-    if (e.key === 'Enter' && !e.shiftKey) { 
+    if (e.key === 'Enter' && !e.shiftKey && !isMobile) { 
       e.preventDefault()
       sendAiMessage() 
     }
@@ -1018,7 +1067,7 @@ export default function ChatBot() {
                   {isRecording ? (
                     <VoiceIndicator>Recording Audio... {formatTime(recordingTime)}</VoiceIndicator>
                   ) : features.enable_text ? (
-                    <TextArea ref={aiTextRef} placeholder="พิมพ์ข้อความ... (Enter ส่ง, พิมพ์ @ แนะนำชื่อเกม)" value={aiInput}
+                    <TextArea ref={aiTextRef} placeholder={t('chat.input_placeholder_ai')} value={aiInput}
                       onChange={handleAiInputChange}
                       onKeyDown={handleAiInputKeyDown}
                       onPaste={handlePaste}
@@ -1061,11 +1110,45 @@ export default function ChatBot() {
                     <WelcomeTitle>{t('chat.support_title')}</WelcomeTitle>
                     <WelcomeText style={{ marginBottom: 14 }} dangerouslySetInnerHTML={{ __html: t('chat.welcome_text').replace(/\n/g, '<br/>') }} />
                     <NameInput
+                      ref={nameInputRef}
                       placeholder={t('chat.name_placeholder')}
                       value={nameInput}
                       onChange={e => setNameInput(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') supportTextRef.current?.focus() }}
+                      $shake={nameInputShake}
                     />
+                    <QuickBtns style={{ marginTop: 16 }}>
+                      <SupportChoiceBtn onClick={() => {
+                        setSupportInput(t('chat.admin_template1'))
+                        setTimeout(() => {
+                          const el = supportTextRef.current
+                          if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus(); el.setSelectionRange(el.value.length, el.value.length) }
+                        }, 50)
+                      }}>
+                        <ChoiceTitle>{t('chat.admin_c1_title')}</ChoiceTitle>
+                        <ChoiceDesc>{t('chat.admin_c1_desc')}</ChoiceDesc>
+                      </SupportChoiceBtn>
+                      <SupportChoiceBtn onClick={() => {
+                        setSupportInput(t('chat.admin_template2'))
+                        setTimeout(() => {
+                          const el = supportTextRef.current
+                          if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus(); el.setSelectionRange(el.value.length, el.value.length) }
+                        }, 50)
+                      }}>
+                        <ChoiceTitle>{t('chat.admin_c2_title')}</ChoiceTitle>
+                        <ChoiceDesc>{t('chat.admin_c2_desc')}</ChoiceDesc>
+                      </SupportChoiceBtn>
+                      <SupportChoiceBtn onClick={() => {
+                        setSupportInput(t('chat.admin_template3'))
+                        setTimeout(() => {
+                          const el = supportTextRef.current
+                          if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus(); el.setSelectionRange(el.value.length, el.value.length) }
+                        }, 50)
+                      }}>
+                        <ChoiceTitle>{t('chat.admin_c3_title')}</ChoiceTitle>
+                        <ChoiceDesc>{t('chat.admin_c3_desc')}</ChoiceDesc>
+                      </SupportChoiceBtn>
+                    </QuickBtns>
                   </NameForm>
                 )}
 
@@ -1144,7 +1227,7 @@ export default function ChatBot() {
                     <VoiceIndicator>Recording... {formatTime(supportRecordingTime)}</VoiceIndicator>
                   ) : (
                     <TextArea ref={supportTextRef}
-                      placeholder={supportPhase === 'naming' ? t('chat.input_placeholder_support_naming') : t('chat.input_placeholder_support') + ' (พิมพ์ @ เพื่อเลือกเกม)'}
+                      placeholder={supportPhase === 'naming' ? t('chat.input_placeholder_support_naming') : t('chat.input_placeholder_ai')}
                       value={supportInput}
                       onChange={handleSupportInputChange}
                       onKeyDown={handleSupportKeyDown}
