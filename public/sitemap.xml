@@ -21,6 +21,18 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://example.com/game/silent-hill-f-digital-deluxe-edition</loc>
+    <lastmod>2026-09-28T08:39:00.721Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/silent-hill-2</loc>
+    <lastmod>2026-09-28T08:35:45.275Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://example.com/game/minecraft-dungeons</loc>
     <lastmod>2026-09-27T17:10:56.720Z</lastmod>
     <changefreq>weekly</changefreq>

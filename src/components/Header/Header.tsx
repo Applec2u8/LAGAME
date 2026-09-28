@@ -338,6 +338,14 @@ const SearchResults = styled.div`
   max-height: 360px;
   overflow-y: auto;
   animation: ${dropIn} 0.15s ease;
+
+  @media (max-width: 1080px) {
+    left: 16px;
+    right: 16px;
+    top: 70px;
+    position: fixed;
+    max-height: calc(100dvh - 90px);
+  }
 `
 
 const SearchResultItem = styled(Link)`
@@ -346,7 +354,15 @@ const SearchResultItem = styled(Link)`
   gap: 12px;
   padding: 10px 14px;
   transition: background 0.15s;
+  overflow: hidden;
   &:hover { background: rgba(124,58,237,0.1); }
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
 `
 
 const MobileMenuBtn = styled.button`
