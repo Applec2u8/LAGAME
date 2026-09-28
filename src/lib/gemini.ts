@@ -75,14 +75,43 @@ export async function generateGameData(prompt: string, modelOverride?: string): 
           .update({ cooldown_until: cooldownTime.toISOString() })
           .eq('id', keyRecord.id)
           
-        console.warn(`Key ${keyRecord.name} is on cooldown until ${cooldownTime.toISOString()}`)
+        console.warn(`Key ${keyRecord.name} is on 24h cooldown until ${cooldownTime.toISOString()}`)
         
         if (i === availableKeys.length - 1) {
           throw new Error(`All available API keys have exhausted their quota. Last error: ${e.message}`)
         }
-      } else {
-        // Unrelated error (e.g. Invalid model, connection issue) -> try next key just in case, or throw?
-        // It's safer to try next key if one key is completely broken.
+      } 
+      // If 503 Service Unavailable, set a short 5-minute cooldown
+      else if (e.message?.includes('503')) {
+        const cooldownTime = new Date()
+        cooldownTime.setMinutes(cooldownTime.getMinutes() + 5)
+        
+        await (supabase as any)
+          .from('gemini_api_keys')
+          .update({ cooldown_until: cooldownTime.toISOString() })
+          .eq('id', keyRecord.id)
+          
+        console.warn(`Key ${keyRecord.name} hit 503 (high demand). Cooldown for 5 mins.`)
+        
+        if (i === availableKeys.length - 1) {
+          throw new Error(`Gemini API Error (503): ${e.message || 'Service Unavailable'}`)
+        }
+      }
+      // If 400 Invalid or 403 Forbidden, permanently disable the key
+      else if (e.message?.includes('400') || e.message?.includes('API_KEY_INVALID') || e.message?.includes('403')) {
+        await (supabase as any)
+          .from('gemini_api_keys')
+          .update({ is_active: false })
+          .eq('id', keyRecord.id)
+          
+        console.error(`Key ${keyRecord.name} is invalid or forbidden (400/403). Permanently disabling.`)
+        
+        if (i === availableKeys.length - 1) {
+          throw new Error(`Gemini API Error: Invalid or forbidden API key.`)
+        }
+      }
+      // Unrelated error -> try next key just in case
+      else {
         if (i === availableKeys.length - 1) {
           throw new Error(`Gemini API Error: ${e.message || 'Unknown error'}`)
         }

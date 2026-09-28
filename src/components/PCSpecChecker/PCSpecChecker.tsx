@@ -354,7 +354,9 @@ const FreeTypeTip = styled.div`
   color: rgba(124,58,237,0.8); background: rgba(124,58,237,0.06);
   border-top: 1px solid rgba(124,58,237,0.1);
   border-radius: 0 0 10px 10px;
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: flex-start; gap: 6px;
+  line-height: 1.4;
+  word-break: break-word;
 `
 
 const AnalyzeBtn = styled.button<{ $loading?: boolean }>`
@@ -511,6 +513,7 @@ const ErrorBox = styled.div`
   margin-top:16px;padding:14px 18px;background:rgba(239,68,68,0.08);
   border:1px solid rgba(239,68,68,0.2);border-radius:10px;font-size:13px;color:#f87171;
   display:flex;align-items:flex-start;gap:8px;line-height:1.5;
+  word-break: break-word;
 `
 
 const ShimmerCard = styled.div`
@@ -531,7 +534,7 @@ interface ComboBoxProps {
   t: (key: string) => string
 }
 
-function ComboBox({ placeholder, options, value, onChange }: ComboBoxProps) {
+function ComboBox({ placeholder, options, value, onChange, t }: ComboBoxProps) {
   const [query, setQuery] = useState(value)
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -575,7 +578,7 @@ function ComboBox({ placeholder, options, value, onChange }: ComboBoxProps) {
           {filtered.length === 0
             ? (
               <FreeTypeTip>
-                ✏️ ไม่พบใน list — สามารถใช้ข้อมูลที่พิมพ์ได้เลย
+                <span>✏️</span> <span>{t('spec.combo_not_found')}</span>
               </FreeTypeTip>
             )
             : (
@@ -587,7 +590,7 @@ function ComboBox({ placeholder, options, value, onChange }: ComboBoxProps) {
                 ))}
                 {isCustomValue && (
                   <FreeTypeTip>
-                    ✏️ ไม่เจอ? กด Enter หรือปิด dropdown เพื่อใช้ "<strong>{query}</strong>"
+                    <span>✏️</span> <span>{t('spec.combo_press_enter')} "<strong>{query}</strong>"</span>
                   </FreeTypeTip>
                 )}
               </>
@@ -711,13 +714,14 @@ export default function PCSpecChecker({ game }: Props) {
       if (!res.verdict || !res.verdict_color) throw new Error(t('spec.err_format'))
       setResult(res)
     } catch (e: any) {
+      console.error("AI Spec Checker Error:", e)
       const msg: string = e.message || 'Unknown error'
       if (msg.includes('quota') || msg.includes('QUOTA') || msg.includes('429') || msg.includes('exhausted'))
         setError(t('spec.err_quota'))
       else if (msg.includes('No active API keys') || msg.includes('fallback'))
         setError(t('spec.err_no_key'))
       else
-        setError(`${t('spec.err_generic')}${msg}`)
+        setError(t('spec.err_generic'))
     } finally {
       setLoading(false)
     }
@@ -797,8 +801,13 @@ export default function PCSpecChecker({ game }: Props) {
         </InputsGrid>
 
         <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(148,163,184,0.4)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Search size={11} />
-          {t('spec.search_or')} <strong style={{ color: 'rgba(124,58,237,0.7)' }}>{t('spec.type_own')}</strong> {t('spec.no_need_list')}
+          <div className='grid grid-cols-1 sm:grid-cols-2 items-start justify-start text-start gap-2'>
+            <span className='w-auto flex items-center gap-1'>
+              <Search size={11} />{t('spec.search_or')}
+              <strong className='w-auto' style={{ color: 'rgba(124,58,237,0.7)' }}>{t('spec.type_own')}</strong>
+            </span>
+            <span className='w-auto'>{t('spec.no_need_list')}</span>
+          </div>
         </div>
 
         <AnalyzeBtn $loading={loading} onClick={handleAnalyze} disabled={!canAnalyze || loading}>

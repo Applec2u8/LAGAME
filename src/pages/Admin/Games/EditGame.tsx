@@ -268,7 +268,8 @@ export default function EditGame() {
   "recommended_requirements": "OS: Windows 10/11 64-bit\\nCPU: Intel Core i7-8700K\\nRAM: 16 GB\\nGPU: NVIDIA RTX 2080",
   "steam_app_id": 12120, // The numeric Steam App ID for the game (crucial for fetching real images, provide it if the game is on Steam)
   "cover_image": "URL to the official game cover",
-  "screenshots": ["URL1", "URL2", "URL3"] (list of in-game screenshot URLs)
+  "screenshots": ["URL1", "URL2", "URL3"], // list of in-game screenshot URLs
+  "is_featured": boolean // true if this is a AAA game, highly popular, or highly recommended masterpiece, otherwise false
 }
 IMPORTANT: Please try your best to provide the accurate 'steam_app_id' if the game exists on Steam.
 Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
@@ -304,6 +305,10 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
           setLinks(prev => prev.map(l => ({ ...l, platform: `emul-${mainConsole}` })))
         }
       }
+    }
+
+    if (aiPreview.is_featured === true) {
+      setIsFeatured(true)
     }
 
     // Fetch real images from SteamGridDB (primary) then fallback to Steam CDN

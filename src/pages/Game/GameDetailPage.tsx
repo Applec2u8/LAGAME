@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -205,8 +205,7 @@ export default function GameDetailPage() {
                 <div style={{ fontSize: 36 }}>🚀</div>
                 <ComingSoonTitle>Coming Soon</ComingSoonTitle>
                 <ComingSoonSub>
-                  เกมนี้กำลังจะเปิดให้ดาวน์โหลดเร็วๆ นี้<br />
-                  โปรดติดตามและรอได้เลย!
+                  {t('game.coming_soon_desc') || 'เตรียมเปิดให้ดาวน์โหลดเร็วๆ นี้'}
                 </ComingSoonSub>
               </ComingSoonBadge>
             ) : links.length === 0 ? (
@@ -384,7 +383,7 @@ export default function GameDetailPage() {
             <button
               onClick={() => setLightbox(null)}
               style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 14, backdropFilter: 'blur(4px)' }}
-            >âœ• Close</button>
+            >× Close</button>
           </Lightbox>
         )}
         <CommentSection type="game" gameId={game.id} />

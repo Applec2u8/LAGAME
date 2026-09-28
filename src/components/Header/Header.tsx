@@ -329,7 +329,8 @@ const SearchIcon = styled.div<{ $expanded?: boolean }>`
 const SearchResults = styled.div`
   position: absolute;
   top: calc(100% + 8px);
-  left: 0; right: 0;
+  right: 0;
+  min-width: 320px;
   background: rgba(14,14,26,0.97);
   border: 1px solid rgba(124,58,237,0.2);
   border-radius: 12px;
@@ -342,6 +343,7 @@ const SearchResults = styled.div`
   @media (max-width: 1080px) {
     left: 16px;
     right: 16px;
+    min-width: 0;
     top: 70px;
     position: fixed;
     max-height: calc(100dvh - 90px);
@@ -362,6 +364,7 @@ const SearchResultItem = styled(Link)`
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+    flex: 1;
   }
 `
 
