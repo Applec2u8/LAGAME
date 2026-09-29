@@ -510,7 +510,7 @@ const lo: TranslationMap = {
   'nav.home': 'ໜ້າຫຼັກ',
   'nav.az_filter': 'ກອງ A-Z',
   'nav.top_games': 'ເກມຍອດນິຍົມ',
-  'nav.guestbook': 'ສຶມຢ້ຽມ',
+  'nav.guestbook': 'Guestbook',
   'nav.browse_az': 'ເບິ່ງຕາມຕົວອັກສອນ',
   'nav.view_all_az': 'ເບິ່ງທັງໝົດ A-Z →',
 
@@ -606,7 +606,7 @@ const lo: TranslationMap = {
   'chat.reset_button': 'ເລີ່ມການສົນທະນາໃໝ່',
   'chat.chat_button_open': 'CHAT',
   'chat.chat_button_close': 'ປິດ',
-  'chat.ai_quota': '⏳ ລະບົບຫລັງກຳລັງເຮັດວຽກ, ລອງອີກຄັ້ງ',
+  'chat.ai_quota': '⏳ ລະບົບຫຍຸດຊົ່ວຄາວ, ລອງອີກຄັ້ງພາຍຫຼັງ',
   'footer.by_team': 'ໂດຍທີມ LA-GAME',
   'chat.ai_error': '❌ ຂໍ້ຜິດພາດ, ກະລຸນາລອງອີກຄັ້ງ',
 
