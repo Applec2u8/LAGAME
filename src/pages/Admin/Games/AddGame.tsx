@@ -399,30 +399,64 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
   }
 
   const processSteamAppId = async (appId: string) => {
+    setSteamAutoLoading(true)
     try {
-      const sgdbImages = await fetchSteamGridDbImages('', Number(appId))
-      if (sgdbImages.cover) setCoverImage(sgdbImages.cover)
-      else setCoverImage(`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`)
+      // 1. Try SteamGridDB proxy (works on production)
+      let cover = ''
+      let screenshots: string[] = []
+      
+      try {
+        const sgdbImages = await fetchSteamGridDbImages('', Number(appId))
+        if (sgdbImages.cover) cover = sgdbImages.cover
+        if (sgdbImages.screenshots.length > 0) screenshots = sgdbImages.screenshots
+      } catch { /* SGDB unavailable in local dev - fall through */ }
 
-      let screenshots = sgdbImages.screenshots
-      if (screenshots.length === 0) {
-        // Fallback to Steam API
-        try {
-          const steamUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=screenshots`
-          const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(steamUrl)}`)
-          const steamData = await res.json()
-          const appData = steamData[appId]?.data
-          if (appData?.screenshots?.length > 0) {
-            screenshots = appData.screenshots.map((s: any) => s.path_full)
-          }
-        } catch { /* silent */ }
+      // 2. Fallback cover: Steam CDN (library portrait > header)
+      if (!cover) {
+        cover = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`
       }
+      setCoverImage(cover)
+      setCoverImgError(false)
+
+      // 3. Fallback screenshots: try multiple CORS proxies in sequence
+      if (screenshots.length === 0) {
+        const steamUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=screenshots`
+        const proxies = [
+          `https://corsproxy.io/?url=${encodeURIComponent(steamUrl)}`,
+          `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(steamUrl)}`,
+        ]
+        for (const proxyUrl of proxies) {
+          try {
+            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(5000) })
+            if (!res.ok) continue
+            const steamData = await res.json()
+            const appData = steamData[appId]?.data
+            if (appData?.screenshots?.length > 0) {
+              screenshots = appData.screenshots.map((s: any) =>
+                (s.path_full as string).replace(/\\/g, '')
+              )
+              break // got what we need
+            }
+          } catch { /* try next proxy */ }
+        }
+      }
+
+      // 4. Last-resort screenshots: use known Steam CDN ss_{num}.600x338.jpg pattern
+      if (screenshots.length === 0) {
+        screenshots = Array.from({ length: 4 }, (_, i) =>
+          `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/ss_${i + 1}.600x338.jpg`
+        )
+      }
+
       if (screenshots.length > 0) {
         setScreenshots(prev => Array.from(new Set([...prev, ...screenshots])))
       }
     } catch (err) {
-      console.error('Failed to fetch media:', err)
-      setCoverImage(`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`)
+      console.error('Failed to fetch Steam media:', err)
+      setCoverImage(`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`)
+      setCoverImgError(false)
+    } finally {
+      setSteamAutoLoading(false)
     }
   }
 

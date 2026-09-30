@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import styled, { keyframes, css } from 'styled-components'
-import { MessageSquare, Send, RefreshCw, Trash2, Clock, Paperclip, File, Mic, Square, X } from 'lucide-react'
+import { MessageSquare, Send, RefreshCw, Trash2, Clock, Paperclip, File, Mic, Square, X, Copy, Reply, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -125,15 +125,19 @@ const BubbleLabel = styled.div<{ $admin?: boolean }>`
   align-self: ${p => p.$admin ? 'flex-end' : 'flex-start'};
 `
 const BubbleWrap = styled.div<{ $admin?: boolean }>`
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  justify-content: flex-start;
-  flex-direction: ${p => p.$admin ? 'row-reverse' : 'row'};
+  display: flex; flex-direction: column; gap: 4px; width: 100%;
+  align-items: ${p => p.$admin ? 'flex-end' : 'flex-start'};
+  &:hover .msg-actions { opacity: 1; pointer-events: auto; }
 `
-const MsgDeleteBtn = styled.button`
-  background: none; border: none; color: rgba(148,163,184,0.3); cursor: pointer; padding: 4px; border-radius: 6px;
-  transition: all 0.2s; display: flex; align-items: center; justify-content: center; opacity: 0; flex-shrink: 0;
-  &:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
-  ${BubbleWrap}:hover & { opacity: 1; }
+const MsgActions = styled.div<{ $admin: boolean }>`
+  display: flex; gap: 4px; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  justify-content: ${p => p.$admin ? 'flex-end' : 'flex-start'};
+`
+const MsgActionBtn = styled.button<{ $danger?: boolean }>`
+  width: 26px; height: 26px; border-radius: 6px; border: none;
+  background: rgba(255,255,255,0.05); color: rgba(148,163,184,0.6);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+  &:hover { background: ${p => p.$danger ? 'rgba(239,68,68,0.15)' : 'rgba(124,58,237,0.15)'}; color: ${p => p.$danger ? '#ef4444' : '#c4b5fd'}; }
 `
 const TimeLabel = styled.div<{ $right?: boolean }>`
   font-size:10px; color:rgba(148,163,184,0.35); margin-top:2px;
@@ -243,12 +247,36 @@ const MentionItem = styled.li<{ $active?: boolean }>`
 `
 
 // ══════════════════════════════════════════════════════════════════
+const ReplyBlock = styled.div`
+  background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 4px; border-left: 3px solid rgba(255,255,255,0.4);
+  font-size: 11px; opacity: 0.85; margin-bottom: 6px;
+`
+
+const renderMessageContent = (content: string) => {
+  if (!content) return null
+  const replyMatch = content.match(/^\[Reply: (.*?)\]\n([\s\S]*)$/)
+  if (replyMatch) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <ReplyBlock>
+          <span style={{ display: 'block', fontSize: 9, fontWeight: 700, marginBottom: 2 }}>ตอบกลับ:</span>
+          {replyMatch[1]}
+        </ReplyBlock>
+        <div>{replyMatch[2]}</div>
+      </div>
+    )
+  }
+  return content
+}
+
 export default function AdminSupport() {
   const [sessions, setSessions] = useState<SupportSession[]>([])
   const [selected, setSelected] = useState<SupportSession | null>(null)
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [replyInput, setReplyInput] = useState('')
+  const [replyingToMsg, setReplyingToMsg] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [notifyEmail, setNotifyEmail] = useState('peun955@gmail.com')
   const [notifyEnabled, setNotifyEnabled] = useState(true)
@@ -353,7 +381,7 @@ export default function AdminSupport() {
         mediaRecorderRef.current = new MediaRecorder(stream)
         audioChunksRef.current = []
         setRecordingTime(0)
-        
+
         mediaRecorderRef.current.ondataavailable = (e) => {
           if (e.data.size > 0) audioChunksRef.current.push(e.data)
         }
@@ -368,7 +396,7 @@ export default function AdminSupport() {
           }])
           stream.getTracks().forEach(track => track.stop())
         }
-        
+
         mediaRecorderRef.current.start()
         setIsRecording(true)
         timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
@@ -383,7 +411,7 @@ export default function AdminSupport() {
     const filesArray = Array.from(e.target.files)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (attachments.length >= 6) { alert('แนบได้สูงสุด 6 ไฟล์'); return }
-    
+
     filesArray.slice(0, 6 - attachments.length).forEach(file => {
       if (file.size > 5 * 1024 * 1024) { alert('ไฟล์มีขนาดเกิน 5MB'); return }
       const url = URL.createObjectURL(file)
@@ -401,8 +429,11 @@ export default function AdminSupport() {
     if (attachments.length >= 6) return
     const items = e.clipboardData?.items
     if (!items) return
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
       if (item.type.startsWith('image/')) {
+        // safety break if too many attachments
+        if (attachments.length >= 6) break
         const file = item.getAsFile()
         if (file) {
           const url = URL.createObjectURL(file)
@@ -421,11 +452,11 @@ export default function AdminSupport() {
 
   // Mention logic
   const filteredGames = games.filter(g => g.name.toLowerCase().includes(mentionFilter.toLowerCase()))
-  
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
     setReplyInput(val)
-    
+
     const lastAtPos = val.lastIndexOf('@')
     if (lastAtPos !== -1) {
       const textAfterAt = val.substring(lastAtPos + 1)
@@ -460,10 +491,15 @@ export default function AdminSupport() {
   }
 
   const sendReply = async () => {
-    const content = replyInput.trim()
-    if (!selected || (!content && attachments.length === 0) || sending) return
+    const rawContent = replyInput.trim()
+    if (!selected || (!rawContent && attachments.length === 0) || sending) return
     setReplyInput('')
     setSending(true)
+
+    let content = rawContent
+    if (replyingToMsg && rawContent) {
+      content = `[Reply: ${replyingToMsg.substring(0, 80)}${replyingToMsg.length > 80 ? '...' : ''}]\n${rawContent}`
+    }
 
     // Send text
     if (content) {
@@ -488,7 +524,7 @@ export default function AdminSupport() {
         contentType: att.type === 'audio' ? 'audio/webm' : (uploadFile as any).type
       })
       if (error) { alert('อัปโหลดไฟล์ไม่สำเร็จ'); continue }
-      
+
       const { data: urlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName)
       const type = att.type === 'audio' ? 'audio' : (uploadFile.type.startsWith('image/') ? 'image' : 'file')
 
@@ -512,7 +548,8 @@ export default function AdminSupport() {
       is_read_by_admin: true,
       message_count: (selected.message_count || 0) + 1
     }).eq('id', selected.id)
-    
+
+    setReplyingToMsg(null)
     fetchSessions()
     setSending(false)
   }
@@ -523,6 +560,16 @@ export default function AdminSupport() {
     await (supabase as any).from('support_sessions').delete().eq('id', sessionId)
     if (selected?.id === sessionId) { setSelected(null); setMessages([]) }
     fetchSessions()
+  }
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text || '')
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 1500)
+  }
+
+  const handleReply = (content: string) => {
+    setReplyingToMsg(content)
   }
 
   // ── Delete individual message ────────────────────────────────────
@@ -556,7 +603,7 @@ export default function AdminSupport() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <h1 style={{ fontFamily: 'Noto Sans Lao', fontSize: 22, fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <h1 style={{ fontFamily: 'Noto Sans Lao', fontSize: 22, fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: 10 }}>
           <MessageSquare size={22} style={{ color: '#7c3aed' }} />
           Support Chat
           {unreadCount > 0 && (
@@ -674,7 +721,7 @@ export default function AdminSupport() {
                     </BubbleLabel>
                     <BubbleWrap $admin={msg.role === 'admin'}>
                       <Bubble $role={msg.role}>
-                        {msg.content && msg.attachment_type !== 'audio' && msg.content}
+                        {msg.content && msg.attachment_type !== 'audio' && renderMessageContent(msg.content)}
                         {msg.attachment_url && msg.attachment_type === 'image' && (
                           <AttachmentImage src={msg.attachment_url} onClick={() => setLightboxUrl(msg.attachment_url!)} />
                         )}
@@ -689,9 +736,21 @@ export default function AdminSupport() {
                           </AttachmentFile>
                         )}
                       </Bubble>
-                      <MsgDeleteBtn onClick={() => deleteMessage(msg.id)} title="ลบข้อความ">
-                        <Trash2 size={13} />
-                      </MsgDeleteBtn>
+                      <MsgActions className="msg-actions" $admin={msg.role === 'admin'}>
+                        <MsgActionBtn
+                          onClick={() => handleCopy(msg.content || msg.attachment_url || '', msg.id)}
+                          title={copiedId === msg.id ? 'Copied!' : 'คัดลอก'}
+                          style={copiedId === msg.id ? { color: '#4ade80', background: 'rgba(74,222,128,0.1)' } : {}}
+                        >
+                          {copiedId === msg.id ? <Check size={13} /> : <Copy size={13} />}
+                        </MsgActionBtn>
+                        <MsgActionBtn onClick={() => handleReply(msg.content || 'Attachment')} title="ตอบกลับ / แท็ก">
+                          <Reply size={13} />
+                        </MsgActionBtn>
+                        <MsgActionBtn $danger onClick={() => deleteMessage(msg.id)} title="ลบข้อความ">
+                          <Trash2 size={13} />
+                        </MsgActionBtn>
+                      </MsgActions>
                     </BubbleWrap>
                     <TimeLabel $right={msg.role === 'admin'}>{fmtTime(msg.created_at)}</TimeLabel>
                   </div>
@@ -716,40 +775,50 @@ export default function AdminSupport() {
                   ))}
                 </div>
               )}
-              <InputArea style={{ position: 'relative' }}>
-                {showMention && filteredGames.length > 0 && (
-                  <MentionMenu>
-                    {filteredGames.map((g, i) => (
-                      <MentionItem key={g.id} $active={i === mentionIndex} onClick={() => insertMention(g)}>
-                        🎮 {g.name}
-                      </MentionItem>
-                    ))}
-                  </MentionMenu>
+              <InputArea style={{ position: 'relative', flexDirection: 'column', padding: 0, gap: 0 }}>
+                {replyingToMsg && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(124,58,237,0.1)', padding: '8px 16px', borderBottom: '1px solid rgba(124,58,237,0.2)', width: '100%', fontSize: 12, color: '#c4b5fd' }}>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <strong style={{ opacity: 0.8 }}>ตอบกลับ:</strong> {replyingToMsg}
+                    </div>
+                    <button onClick={() => setReplyingToMsg(null)} style={{ background: 'none', border: 'none', color: '#c4b5fd', cursor: 'pointer', padding: 4 }}><X size={14} /></button>
+                  </div>
                 )}
-                <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} multiple />
-                <AttachBtn onClick={() => fileInputRef.current?.click()} disabled={sending || attachments.length >= 6} title="แนบไฟล์ (สูงสุด 6 ไฟล์)">
-                  <Paperclip size={18} />
-                </AttachBtn>
-                <AttachBtn onClick={toggleRecording} disabled={sending || attachments.length >= 6} title={isRecording ? 'หยุดอัด' : 'อัดเสียง'}>
-                  <Mic size={18} color={isRecording ? '#ef4444' : 'currentColor'} />
-                </AttachBtn>
-                {isRecording ? (
-                  <VoiceIndicator>กำลังอัดเสียง... {formatTime(recordingTime)}</VoiceIndicator>
-                ) : (
-                  <TextArea
-                    placeholder="พิมพ์คำตอบในฐานะ Admin..."
-                    value={replyInput}
-                    onChange={handleInput}
-                    onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
-                    rows={1}
-                    onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }}
-                    disabled={sending}
-                  />
-                )}
-                <SendBtn onClick={isRecording ? toggleRecording : sendReply} disabled={sending || (!replyInput.trim() && attachments.length === 0 && !isRecording)}>
-                  {sending ? 'ส่ง...' : isRecording ? <Square size={14} /> : <Send size={14} />}
-                </SendBtn>
+                <div style={{ padding: '12px 16px', width: '100%', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+                  {showMention && filteredGames.length > 0 && (
+                    <MentionMenu>
+                      {filteredGames.map((g, i) => (
+                        <MentionItem key={g.id} $active={i === mentionIndex} onClick={() => insertMention(g)}>
+                          🎮 {g.name}
+                        </MentionItem>
+                      ))}
+                    </MentionMenu>
+                  )}
+                  <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} multiple />
+                  <AttachBtn onClick={() => fileInputRef.current?.click()} disabled={sending || attachments.length >= 6} title="แนบไฟล์ (สูงสุด 6 ไฟล์)">
+                    <Paperclip size={18} />
+                  </AttachBtn>
+                  <AttachBtn onClick={toggleRecording} disabled={sending || attachments.length >= 6} title={isRecording ? 'หยุดอัด' : 'อัดเสียง'}>
+                    <Mic size={18} color={isRecording ? '#ef4444' : 'currentColor'} />
+                  </AttachBtn>
+                  {isRecording ? (
+                    <VoiceIndicator>กำลังอัดเสียง... {formatTime(recordingTime)}</VoiceIndicator>
+                  ) : (
+                    <TextArea
+                      placeholder="พิมพ์คำตอบในฐานะ Admin..."
+                      value={replyInput}
+                      onChange={handleInput}
+                      onKeyDown={handleKeyDown}
+                      onPaste={handlePaste}
+                      rows={1}
+                      onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }}
+                      disabled={sending}
+                    />
+                  )}
+                  <SendBtn onClick={isRecording ? toggleRecording : sendReply} disabled={sending || (!replyInput.trim() && attachments.length === 0 && !isRecording)}>
+                    {sending ? 'ส่ง...' : isRecording ? <Square size={14} /> : <Send size={14} />}
+                  </SendBtn>
+                </div>
               </InputArea>
             </>
           )}
