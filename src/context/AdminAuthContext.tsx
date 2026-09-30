@@ -1,42 +1,56 @@
-import React, { createContext, useContext, useState } from 'react'
-
-const ADMIN_PIN = import.meta.env.VITE_ADMIN_PIN || '1234'
-const SESSION_KEY = 'lapack_admin_auth'
+import React, { createContext, useContext, useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
+import type { Session, User } from '@supabase/supabase-js'
 
 type AdminAuthContextType = {
   isAuthenticated: boolean
-  login: (pin: string) => boolean
-  logout: () => void
+  isLoading: boolean
+  user: User | null
+  logout: () => Promise<void>
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType>({
   isAuthenticated: false,
-  login: () => false,
-  logout: () => { },
+  isLoading: true,
+  user: null,
+  logout: async () => {},
 })
 
 export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return sessionStorage.getItem(SESSION_KEY) === 'true'
-  })
+  const [session, setSession] = useState<Session | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  const login = (pin: string): boolean => {
-    if (pin === ADMIN_PIN) {
-      sessionStorage.setItem(SESSION_KEY, 'true')
-      setIsAuthenticated(true)
-      return true
-    }
-    return false
-  }
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setIsLoading(false)
+    }).catch(err => {
+      console.error('Failed to get Supabase session:', err)
+      setIsLoading(false)
+    })
 
-  const logout = () => {
-    sessionStorage.removeItem(SESSION_KEY)
-    setIsAuthenticated(false)
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setIsLoading(false)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const logout = async () => {
+    await supabase.auth.signOut()
     window.location.href = '/'
   }
 
   return (
-    <AdminAuthContext.Provider value={{ isAuthenticated, login, logout }}>
+    <AdminAuthContext.Provider value={{
+      isAuthenticated: !!session,
+      isLoading,
+      user: session?.user ?? null,
+      logout
+    }}>
       {children}
     </AdminAuthContext.Provider>
   )

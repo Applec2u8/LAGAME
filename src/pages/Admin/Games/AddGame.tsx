@@ -401,51 +401,57 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
   const processSteamAppId = async (appId: string) => {
     setSteamAutoLoading(true)
     try {
-      // 1. Try SteamGridDB proxy (works on production)
+      // 1. Try SteamGridDB proxy (works on production/Cloudflare)
       let cover = ''
       let screenshots: string[] = []
-      
+
       try {
         const sgdbImages = await fetchSteamGridDbImages('', Number(appId))
         if (sgdbImages.cover) cover = sgdbImages.cover
         if (sgdbImages.screenshots.length > 0) screenshots = sgdbImages.screenshots
       } catch { /* SGDB unavailable in local dev - fall through */ }
 
-      // 2. Fallback cover: Steam CDN (library portrait > header)
+      // 2. Cover fallback: Steam CDN (try portrait first, then header)
       if (!cover) {
         cover = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`
       }
       setCoverImage(cover)
       setCoverImgError(false)
 
-      // 3. Fallback screenshots: try multiple CORS proxies in sequence
+      // 3. Screenshots: try CORS proxy to get real screenshot list from Steam API
       if (screenshots.length === 0) {
-        const steamUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=screenshots`
+        const steamApiUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=screenshots`
         const proxies = [
-          `https://corsproxy.io/?url=${encodeURIComponent(steamUrl)}`,
-          `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(steamUrl)}`,
+          `https://corsproxy.io/?url=${encodeURIComponent(steamApiUrl)}`,
+          `https://api.allorigins.win/get?url=${encodeURIComponent(steamApiUrl)}`,
+          `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(steamApiUrl)}`,
         ]
         for (const proxyUrl of proxies) {
           try {
-            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(5000) })
+            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) })
             if (!res.ok) continue
-            const steamData = await res.json()
+            const raw = await res.json()
+            // allorigins wraps in { contents: "..." }
+            const steamData = typeof raw?.contents === 'string' ? JSON.parse(raw.contents) : raw
             const appData = steamData[appId]?.data
             if (appData?.screenshots?.length > 0) {
               screenshots = appData.screenshots.map((s: any) =>
                 (s.path_full as string).replace(/\\/g, '')
               )
-              break // got what we need
+              break
             }
           } catch { /* try next proxy */ }
         }
       }
 
-      // 4. Last-resort screenshots: use known Steam CDN ss_{num}.600x338.jpg pattern
+      // 4. Last-resort: use Steam Store page header + capsule images as screenshots
+      // These are guaranteed to exist if the appId is valid
       if (screenshots.length === 0) {
-        screenshots = Array.from({ length: 4 }, (_, i) =>
-          `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/ss_${i + 1}.600x338.jpg`
-        )
+        screenshots = [
+          `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,
+          `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/capsule_616x353.jpg`,
+          `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/hero_capsule.jpg`,
+        ]
       }
 
       if (screenshots.length > 0) {

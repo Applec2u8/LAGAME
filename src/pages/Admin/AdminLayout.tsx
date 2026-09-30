@@ -117,16 +117,16 @@ export default function AdminLayout() {
         .from('support_sessions')
         .select('*', { count: 'exact', head: true })
         .eq('is_read_by_admin', false)
-      
+
       const { count: commentsCount } = await supabase
         .from('comments')
         .select('*', { count: 'exact', head: true })
         .eq('is_read', false)
-      
+
       if (supportCount !== null) setUnreadSupport(supportCount)
       if (commentsCount !== null) setUnreadComments(commentsCount)
     }
-    
+
     fetchCounts()
 
     const sub = supabase.channel('admin_notifications')
@@ -134,7 +134,7 @@ export default function AdminLayout() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'support_sessions' }, fetchCounts)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, fetchCounts)
       .subscribe()
-      
+
     return () => { sub.unsubscribe() }
   }, [])
 
@@ -145,7 +145,7 @@ export default function AdminLayout() {
       <Backdrop $open={sidebarOpen} onClick={() => setSidebarOpen(false)} />
       <Sidebar $open={sidebarOpen}>
         <SidebarTop>
-          <Logo><Gamepad2 size={22} color="#06b6d4" /> LAPACK</Logo>
+          <Logo><Gamepad2 size={22} color="#06b6d4" /> LA-GAME</Logo>
           <AdminBadge>🔐 Admin Panel</AdminBadge>
         </SidebarTop>
 
@@ -154,7 +154,7 @@ export default function AdminLayout() {
             const isSupport = item.to.includes('support')
             const isComments = item.to.includes('comments')
             const badgeCount = isSupport ? unreadSupport : isComments ? unreadComments : 0
-            
+
             return (
               <NavItem key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}>
                 <NavLabel>
