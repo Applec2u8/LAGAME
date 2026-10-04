@@ -1,6 +1,9 @@
 import styled from 'styled-components'
 
-export const Page = styled.div`max-width: 1100px; margin: 0 auto; padding: 32px 24px;`
+export const Page = styled.div`
+  max-width: 1100px; margin: 0 auto; padding: 32px 24px;
+  @media (max-width: 480px) { padding: 16px 14px; }
+`
 
 export const Back = styled.button`
   background: none; border: none; cursor: pointer; padding: 0;
@@ -11,8 +14,9 @@ export const Back = styled.button`
 `
 
 export const Hero = styled.div`
-  display: grid; grid-template-columns: 320px 1fr; gap: 32px;
-  @media (max-width: 768px) { grid-template-columns: 1fr; }
+  display: grid; grid-template-columns: 280px 1fr; gap: 32px;
+  @media (max-width: 900px) { grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 600px) { grid-template-columns: 1fr; gap: 20px; }
 `
 
 export const CoverImg = styled.img`
@@ -157,3 +161,37 @@ export const ComingSoonSub = styled.div`
   font-size: 13px; color: rgba(148,163,184,0.6); text-align: center; line-height: 1.6;
 `
 
+// Share row
+export const ShareRow = styled.div`
+  display: flex; flex-wrap: wrap; gap: 10px;
+  margin-top: 20px;
+  @media (max-width: 480px) { gap: 8px; }
+`
+
+export const ShareBtn = styled.button<{ $variant?: 'copy' | 'facebook' | 'twitter' | 'line' | 'native' }>`
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 16px; border-radius: 10px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; border: 1px solid;
+  white-space: nowrap;
+  ${({ $variant }) => {
+    switch ($variant) {
+      case 'facebook': return `background: rgba(24,119,242,0.12); border-color: rgba(24,119,242,0.35); color: #60a5fa;`
+      case 'twitter': return `background: rgba(29,161,242,0.12); border-color: rgba(29,161,242,0.35); color: #38bdf8;`
+      case 'line': return `background: rgba(0,185,0,0.12); border-color: rgba(0,185,0,0.35); color: #4ade80;`
+      case 'native': return `background: rgba(124,58,237,0.15); border-color: rgba(124,58,237,0.4); color: #a78bfa;`
+      default: return `background: rgba(30,30,50,0.9); border-color: rgba(148,163,184,0.25); color: rgba(148,163,184,0.85);`
+    }
+  }}
+  &:hover { opacity: 0.85; transform: translateY(-2px); }
+`
+
+export const CopyToast = styled.div<{ $visible: boolean }>`
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  background: rgba(124,58,237,0.92); backdrop-filter: blur(10px);
+  border: 1px solid rgba(167,139,250,0.4); border-radius: 12px;
+  padding: 10px 22px; font-size: 13px; font-weight: 600; color: #fff;
+  pointer-events: none; z-index: 9999;
+  transition: opacity 0.3s, transform 0.3s;
+  opacity: ${({ $visible }) => ($visible ? 1 : 0)};
+  transform: translateX(-50%) translateY(${({ $visible }) => ($visible ? '0' : '10px')});
+`

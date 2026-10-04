@@ -21,6 +21,24 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://example.com/game/gta-san-andreas-classic-modded-edition-v2-p2p-free-online-steam-games-for-pc</loc>
+    <lastmod>2026-10-02T19:04:40.986Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/minecraft-dungeons-ii</loc>
+    <lastmod>2026-10-02T18:59:25.532Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/minecraft-dungeons</loc>
+    <lastmod>2026-10-02T18:43:54.926Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://example.com/game/elden-ring-deluxe-edition</loc>
     <lastmod>2026-09-28T21:12:07.943Z</lastmod>
     <changefreq>weekly</changefreq>
@@ -47,12 +65,6 @@
   <url>
     <loc>https://example.com/game/silent-hill-2</loc>
     <lastmod>2026-09-28T08:35:45.275Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://example.com/game/minecraft-dungeons</loc>
-    <lastmod>2026-09-27T17:10:56.720Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -467,12 +479,6 @@
   <url>
     <loc>https://example.com/game/mortal-kombat-1-khaos-reigns-kollection</loc>
     <lastmod>2026-08-08T19:10:07.725Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://example.com/game/gta-san-andreas-classic-modded-edition-v2-p2p-free-online-steam-games-for-pc</loc>
-    <lastmod>2026-08-08T18:48:53.720Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>

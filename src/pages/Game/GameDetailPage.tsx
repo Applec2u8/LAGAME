@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react'
+﻿import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages } from 'lucide-react'
+import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages, Share2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import type { Game, DownloadLink, Category } from '../../lib/supabase'
 import { useCategoryTranslator } from '../../lib/i18n/CategoryTranslator'
@@ -16,7 +16,8 @@ import {
   Page, Back, Hero, CoverImg, CoverPlaceholder, Info, CategoryBadge, Title,
   Description, Section, SectionTitle, DownloadBtn, CloudName, DownArrow, SpecGrid,
   SpecCard, SpecTitle, GalleryWrap, GalleryScroll, Screenshot, Lightbox,
-  LightboxNav, LightboxCounter, LoadingPage, ComingSoonBadge, ComingSoonTitle, ComingSoonSub
+  LightboxNav, LightboxCounter, LoadingPage, ComingSoonBadge, ComingSoonTitle, ComingSoonSub,
+  ShareBtn, CopyToast,
 } from './GameDetailStyles'
 
 
@@ -44,13 +45,14 @@ export default function GameDetailPage() {
   const { slug } = useParams()
   const navigate = useNavigate()
   const { adSettings } = useAdSettings()
-  const { locale, t, isTranslating } = useLanguage()
+  const { locale, t, isTranslating, retriggerTranslation } = useLanguage()
   const [game, setGame] = useState<Game | null>(null)
   const [gameCategories, setGameCategories] = useState<Category[]>([])
   const { translateCategoryName } = useCategoryTranslator()
   const [links, setLinks] = useState<DownloadLink[]>([])
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false)
 
   // Mark all possible listing pages so that if the user goes back to any of them, it restores their specific scroll.
   useEffect(() => {
@@ -138,6 +140,20 @@ export default function GameDetailPage() {
     }
   }
 
+  const handleShare = async () => {
+    const url = window.location.href
+    const title = game?.title ?? 'Game'
+    const text = `${title} - Free PC Game Download on LA-GAME`
+    if (navigator.share) {
+      try { await navigator.share({ title, text, url }) } catch { }
+    } else {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2200)
+    }
+  }
+
+
   if (loading) return <LoadingPage><Loader2 size={24} style={{ animation: 'spin 0.8s linear infinite' }} /> {t('game.loading')}</LoadingPage>
   if (!game) return null
 
@@ -173,28 +189,30 @@ export default function GameDetailPage() {
               </div>
             )}
             <Title>{game.title}</Title>
-            {(game as any).is_coming_soon && (
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                background: 'linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1))',
-                border: '1px solid rgba(251,191,36,0.4)',
-                borderRadius: 8, padding: '6px 14px', marginBottom: 14,
-                fontSize: 13, fontWeight: 700, color: '#fbbf24',
-                letterSpacing: '0.5px', textTransform: 'uppercase',
-                boxShadow: '0 0 20px rgba(251,191,36,0.15)'
-              }}>
-                🚀 Coming Soon
-              </div>
-            )}
-            {(game as any).file_size && (
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)',
-                borderRadius: 8, padding: '6px 12px', marginBottom: 14, fontSize: 13, color: '#c4b5fd'
-              }}>
-                💾 <strong>{t('game.storage')}:</strong>&nbsp;{(game as any).file_size}
-              </div>
-            )}
+            {/* Meta row: file size + share buttons */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 18, marginTop: 4 }}>
+              {/* File size badge */}
+              {(game as any).file_size && (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)',
+                  borderRadius: 8, padding: '6px 12px', fontSize: 13, color: '#c4b5fd',
+                  flexShrink: 0,
+                }}>
+                  💾 <strong>{t('game.storage')}:</strong>&nbsp;{(game as any).file_size}
+                </div>
+              )}
+              {/* Divider */}
+              {(game as any).file_size && (
+                <div style={{ width: 1, height: 22, background: 'rgba(148,163,184,0.15)', flexShrink: 0 }} />
+              )}
+              {/* Share buttons */}
+              {typeof navigator !== 'undefined' && 'share' in navigator && (
+                <ShareBtn $variant="native" onClick={handleShare}>
+                  <Share2 size={13} /> Share
+                </ShareBtn>
+              )}
+            </div>
             {/* Short description preview */}
             {game.description && <Description translate="yes">{game.description.slice(0, 400)}{game.description.length > 400 ? '...' : ''}</Description>}
 
@@ -306,9 +324,21 @@ export default function GameDetailPage() {
                   {locale === 'th' ? 'กำลังแปลภาษา...' : locale === 'lo' ? 'ກຳລັງແປພາສາ...' : 'Translating...'}
                 </span>
               ) : locale !== 'en' ? (
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(124,58,237,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  <Languages size={12} /> Google Translate
-                </span>
+                <button
+                  onClick={retriggerTranslation}
+                  title="Click to re-translate"
+                  style={{
+                    marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5,
+                    fontSize: 11, color: 'rgba(124,58,237,0.85)', fontWeight: 600,
+                    textTransform: 'uppercase', letterSpacing: '0.5px',
+                    background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
+                    borderRadius: 6, padding: '3px 8px', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.22)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
+                >
+                  <Languages size={12} /> Google Translate ↻
+                </button>
               ) : null}
             </SectionTitle>
             <SpecGrid>
@@ -337,9 +367,21 @@ export default function GameDetailPage() {
                   {locale === 'th' ? 'กำลังแปลภาษา...' : locale === 'lo' ? 'ກຳລັງແປພາສາ...' : 'Translating...'}
                 </span>
               ) : locale !== 'en' ? (
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(124,58,237,0.7)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  <Languages size={12} /> Google Translate
-                </span>
+                <button
+                  onClick={retriggerTranslation}
+                  title="Click to re-translate"
+                  style={{
+                    marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5,
+                    fontSize: 11, color: 'rgba(124,58,237,0.85)', fontWeight: 600,
+                    textTransform: 'uppercase', letterSpacing: '0.5px',
+                    background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
+                    borderRadius: 6, padding: '3px 8px', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.22)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
+                >
+                  <Languages size={12} /> Google Translate ↻
+                </button>
               ) : null}
             </SectionTitle>
             <div style={{
@@ -387,7 +429,8 @@ export default function GameDetailPage() {
           </Lightbox>
         )}
         <CommentSection type="game" gameId={game.id} />
-      </Page>
+      </Page >
+      <CopyToast $visible={copied}>✓ Link copied to clipboard!</CopyToast>
     </>
   )
 }
