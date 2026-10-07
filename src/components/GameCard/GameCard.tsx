@@ -29,11 +29,24 @@ const CoverWrap = styled.div`
   background: #12121f;
 `
 
-const Cover = styled.img`
+const CoverBlur = styled.img`
+  position: absolute;
+  inset: -20%;
+  width: 140%;
+  height: 140%;
+  object-fit: cover;
+  filter: blur(20px) brightness(0.4);
+  z-index: 0;
+  opacity: 0.9;
+`
+
+const Cover = styled.img<{ $orient?: string }>`
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: top center;
+  object-fit: ${p => p.$orient === 'landscape' ? 'contain' : 'cover'};
+  object-position: center;
   transition: transform 0.4s ease;
   ${Card}:hover & { transform: scale(1.05); }
 `
@@ -180,7 +193,15 @@ export default function GameCard({ game }: Props) {
     <Card to={`/game/${game.slug}`} onClick={saveScrollOnClick}>
       <CoverWrap>
         {game.cover_image ? (
-          <Cover src={game.cover_image} alt={game.title} loading="lazy" />
+          <>
+            {game.cover_image.includes('#landscape') && <CoverBlur src={game.cover_image.split('#')[0]} alt="" />}
+            <Cover 
+              src={game.cover_image.split('#')[0]} 
+              alt={game.title} 
+              loading="lazy" 
+              $orient={game.cover_image.includes('#landscape') ? 'landscape' : 'portrait'}
+            />
+          </>
         ) : (
           <PlaceholderCover>🎮</PlaceholderCover>
         )}

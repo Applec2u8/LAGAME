@@ -21,6 +21,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://example.com/game/minecraft-dungeons-v1-17-0-0-multiplayer</loc>
+    <lastmod>2026-10-07T05:56:23.709Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://example.com/game/gta-san-andreas-classic-modded-edition-v2-p2p-free-online-steam-games-for-pc</loc>
     <lastmod>2026-10-02T19:04:40.986Z</lastmod>
     <changefreq>weekly</changefreq>
@@ -29,12 +35,6 @@
   <url>
     <loc>https://example.com/game/minecraft-dungeons-ii</loc>
     <lastmod>2026-10-02T18:59:25.532Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://example.com/game/minecraft-dungeons</loc>
-    <lastmod>2026-10-02T18:43:54.926Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>

@@ -9,6 +9,11 @@ export default defineConfig({
   ],
   server: {
     proxy: {
+      '/steam-proxy': {
+        target: 'https://store.steampowered.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/steam-proxy/, '')
+      },
       '/steamspy': {
         target: 'https://steamspy.com',
         changeOrigin: true,

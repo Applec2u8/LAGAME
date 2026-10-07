@@ -423,10 +423,27 @@ const FpsGrid = styled.div`
   @media(max-width:500px){grid-template-columns:1fr 1fr;}
 `
 
-const FpsBox = styled.div<{ $variant: 'low' | 'avg' | 'high' }>`
+const fpsFlash = keyframes`
+  0%   { transform: scale(0.92); opacity: 0.3; }
+  50%  { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1.00); opacity: 1; }
+`
+
+const FpsBox = styled.div<{ $variant: 'low' | 'avg' | 'high'; $animKey?: string }>`
   background: rgba(124,58,237,0.06); border-radius: 10px; padding: 12px;
   border: 1px solid rgba(124,58,237,0.12);
   text-align: center;
+`
+
+const FpsValueWrap = styled.div<{ $animKey?: string }>`
+  animation: ${fpsFlash} 0.35s ease;
+  animation-fill-mode: both;
+`
+
+const FpsDelta = styled.div<{ $positive: boolean }>`
+  font-size: 10px; font-weight: 700; margin-top: 4px;
+  color: ${p => p.$positive ? '#4ade80' : '#f87171'};
+  letter-spacing: 0.3px;
 `
 
 const FpsLabel = styled.div`font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: rgba(148,163,184,0.4); margin-bottom: 4px;`
@@ -451,6 +468,37 @@ const FpsPresetChip = styled.div<{ $active?: boolean }>`
   background: ${p => p.$active ? 'rgba(124,58,237,0.25)' : 'rgba(124,58,237,0.06)'};
   border: 1px solid ${p => p.$active ? 'rgba(124,58,237,0.5)' : 'rgba(124,58,237,0.1)'};
   color: ${p => p.$active ? '#c4b5fd' : 'rgba(148,163,184,0.5)'};
+`
+
+// Resolution Selector
+const ResSelector = styled.div`
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 14px; padding: 10px 14px;
+  background: rgba(124,58,237,0.04); border: 1px solid rgba(124,58,237,0.1);
+  border-radius: 10px;
+`
+
+const ResLabel = styled.span`
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.6px; color: rgba(148,163,184,0.4); margin-right: 4px;
+`
+
+const ResBtn = styled.button<{ $active?: boolean }>`
+  padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700;
+  cursor: pointer; border: 1px solid;
+  transition: all 0.18s ease;
+  background: ${p => p.$active ? 'rgba(124,58,237,0.3)' : 'rgba(124,58,237,0.06)'};
+  border-color: ${p => p.$active ? 'rgba(124,58,237,0.6)' : 'rgba(124,58,237,0.15)'};
+  color: ${p => p.$active ? '#e9d5ff' : 'rgba(148,163,184,0.55)'};
+  box-shadow: ${p => p.$active ? '0 0 8px rgba(124,58,237,0.25)' : 'none'};
+  &:hover { background: rgba(124,58,237,0.2); color: #c4b5fd; border-color: rgba(124,58,237,0.4); }
+`
+
+// Desktop 2-col grid wrapper
+const ResultGrid = styled.div`
+  display: grid; grid-template-columns: 1fr;
+  gap: 14px;
+  @media(min-width: 768px) { grid-template-columns: 1fr 1fr; }
 `
 
 // Settings Table
@@ -705,6 +753,53 @@ export default function PCSpecChecker({ game }: Props) {
   const [result, setResult] = useState<SpecResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<string>('AI')
+  const [selectedRes, setSelectedRes] = useState<string>('1080p')
+
+  // FPS scale factors relative to 1080p
+  const RES_SCALE: Record<string, number> = {
+    '480p': 1.80, '720p': 1.30, '1080p': 1.00,
+    '1440p': 0.72, '4K': 0.50
+  }
+
+  // Human-readable resolution strings
+  const RES_LABELS: Record<string, string> = {
+    '480p':  '854×480 (480p)',
+    '720p':  '1280×720 (720p)',
+    '1080p': '1920×1080 (1080p)',
+    '1440p': '2560×1440 (1440p)',
+    '4K':    '3840×2160 (4K)',
+  }
+
+  const scaleFps = (v: number | null): number | null => {
+    if (v == null) return null
+    const s = RES_SCALE[selectedRes] ?? 1
+    return Math.round(v * s)
+  }
+
+  /**
+   * Returns adapted quality settings for a given resolution.
+   * When going lower than 1080p, quality settings drop realistically.
+   * When going higher than 1080p, quality settings also drop to maintain similar FPS.
+   */
+  const getAdaptedSettings = (s: SpecResult['settings']): SpecResult['settings'] => {
+    if (!s) return s
+    const downgrade: Record<string, Record<string, string>> = {
+      // For sub-1080p resolutions, quality is traded for FPS
+      '480p':  { overall_preset: 'Low', texture_quality: 'Low', shadow_quality: 'Low', effects_quality: 'Low', view_distance: 'Low', anti_aliasing: 'Off', ray_tracing: 'Off' },
+      '720p':  { overall_preset: 'Medium', texture_quality: 'Medium', shadow_quality: 'Low', effects_quality: 'Medium', view_distance: 'Medium', anti_aliasing: 'FXAA', ray_tracing: 'Off' },
+      // For super-high resolutions, quality also needs to drop to sustain similar FPS
+      '1440p': { overall_preset: 'Medium', texture_quality: s.texture_quality, shadow_quality: 'Low', effects_quality: 'Medium', view_distance: s.view_distance, anti_aliasing: 'TAA', ray_tracing: 'Off' },
+      '4K':    { overall_preset: 'Low', texture_quality: 'Medium', shadow_quality: 'Low', effects_quality: 'Low', view_distance: 'Medium', anti_aliasing: 'DLSS / FSR', ray_tracing: 'Off' },
+    }
+    const overrides = downgrade[selectedRes]
+    if (!overrides) return { ...s, resolution: RES_LABELS[selectedRes] || s.resolution }
+    return { ...s, resolution: RES_LABELS[selectedRes] || s.resolution, ...overrides }
+  }
+
+  useEffect(() => {
+    // Reset resolution selector whenever a new analysis result comes in
+    setSelectedRes('1080p')
+  }, [result])
 
   useEffect(() => {
     getActiveModelInfo('game_details').then(info => {
@@ -763,7 +858,7 @@ export default function PCSpecChecker({ game }: Props) {
         }
       `}</style>
 
-      <SectionTitle>
+      <SectionTitle translate="no">
         <Monitor size={15} />
         {t('spec.title')}
         {locale !== 'en' && (
@@ -869,91 +964,131 @@ export default function PCSpecChecker({ game }: Props) {
               </VerdictText>
             </VerdictBanner>
 
-            {/* FPS Section */}
-            <FpsSection>
-              <FpsSectionTitle>
-                <TrendingUp size={12} />
-                {t('spec.fps_title')}
-              </FpsSectionTitle>
-
-              {/* Recommended preset FPS */}
-              <div style={{ fontSize: 12, color: 'rgba(124,58,237,0.8)', fontWeight: 700, marginBottom: 10 }}>
-                🎯 {t('spec.recommended_preset')} {result.recommended_preset.preset}
-              </div>
-              <FpsGrid>
-                <FpsBox $variant="low">
-                  <FpsLabel>1% Low</FpsLabel>
-                  <FpsValue $variant="low">
-                    {fmtFps(result.recommended_preset.fps_low)}
-                    {result.recommended_preset.fps_low != null && <FpsUnit>fps</FpsUnit>}
-                  </FpsValue>
-                  <FpsSub>{t('spec.fps_low_sub')}</FpsSub>
-                </FpsBox>
-                <FpsBox $variant="avg">
-                  <FpsLabel>⌀ Average</FpsLabel>
-                  <FpsValue $variant="avg">
-                    {fmtFps(result.recommended_preset.fps_avg)}
-                    {result.recommended_preset.fps_avg != null && <FpsUnit>fps</FpsUnit>}
-                  </FpsValue>
-                  <FpsSub>{t('spec.fps_avg_sub')}</FpsSub>
-                </FpsBox>
-                <FpsBox $variant="high">
-                  <FpsLabel>Peak High</FpsLabel>
-                  <FpsValue $variant="high">
-                    {fmtFps(result.recommended_preset.fps_high)}
-                    {result.recommended_preset.fps_high != null && <FpsUnit>fps</FpsUnit>}
-                  </FpsValue>
-                  <FpsSub>{t('spec.fps_high_sub')}</FpsSub>
-                </FpsBox>
-              </FpsGrid>
-
-              {/* Alternate presets */}
-              {result.alternate_presets && result.alternate_presets.length > 0 && (
-                <>
-                  <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.45)', marginTop: 14, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    {t('spec.other_presets')}
-                  </div>
-                  <FpsPresetBar>
-                    {result.alternate_presets.map((ap, i) => (
-                      <FpsPresetChip key={i}>
-                        {ap.preset} — avg <strong>{fmtFps(ap.fps_avg)}</strong> fps
-                        {ap.fps_low != null && ` (low ${fmtFps(ap.fps_low)})`}
-                      </FpsPresetChip>
-                    ))}
-                  </FpsPresetBar>
-                </>
-              )}
-            </FpsSection>
-
-            {/* Settings Detail */}
-            {result.settings && (
-              <SettingsSection>
+            {/* FPS + Settings — 2 col on desktop */}
+            <ResultGrid>
+              {/* FPS Section */}
+              <FpsSection>
                 <FpsSectionTitle>
-                  <Settings2 size={12} />
-                  {t('spec.settings_title')}
+                  <TrendingUp size={12} />
+                  {t('spec.fps_title')}
                 </FpsSectionTitle>
-                <SettingsTable>
-                  {[
-                    ['📐 ' + t('spec.resolution'), result.settings.resolution],
-                    ['🎮 ' + t('spec.overall_preset'), result.settings.overall_preset],
-                    ['🖼️ ' + t('spec.texture'), result.settings.texture_quality],
-                    ['🌑 ' + t('spec.shadow'), result.settings.shadow_quality],
-                    ['✨ ' + t('spec.anti_aliasing'), result.settings.anti_aliasing],
-                    ['🔭 ' + t('spec.view_distance'), result.settings.view_distance],
-                    ['💥 ' + t('spec.effects'), result.settings.effects_quality],
-                    ['🔒 ' + t('spec.vsync'), result.settings.v_sync],
-                    ...(result.settings.ray_tracing ? [['🌟 ' + t('spec.ray_tracing'), result.settings.ray_tracing]] : []),
-                  ].map(([key, val]) => (
-                    <SettingsRow key={key}>
-                      <SettingsKey>{key}</SettingsKey>
-                      <SettingsVal $level={val}>{val}</SettingsVal>
-                    </SettingsRow>
-                  ))}
-                </SettingsTable>
-              </SettingsSection>
-            )}
 
-            {/* Tips */}
+                {/* Resolution selector */}
+                <ResSelector>
+                  <ResLabel>🖥 Resolution:</ResLabel>
+                  {['480p','720p','1080p','1440p','4K'].map(r => (
+                    <ResBtn key={r} $active={selectedRes === r} onClick={() => setSelectedRes(r)}>{r}</ResBtn>
+                  ))}
+                </ResSelector>
+
+                {/* Recommended preset FPS */}
+                <div style={{ fontSize: 12, color: 'rgba(124,58,237,0.8)', fontWeight: 700, marginBottom: 10 }}>
+                  🎯 {t('spec.recommended_preset')} {result.recommended_preset.preset}
+                  {selectedRes !== '1080p' && (
+                    <span style={{ marginLeft: 8, fontSize: 10, color: 'rgba(148,163,184,0.5)', fontWeight: 600 }}>@{selectedRes} (scaled)</span>
+                  )}
+                </div>
+                <FpsGrid key={selectedRes}>
+                  <FpsBox $variant="low">
+                    <FpsLabel>1% Low</FpsLabel>
+                    <FpsValueWrap>
+                      <FpsValue $variant="low">
+                        {fmtFps(scaleFps(result.recommended_preset.fps_low))}
+                        {result.recommended_preset.fps_low != null && <FpsUnit>fps</FpsUnit>}
+                      </FpsValue>
+                      {selectedRes !== '1080p' && result.recommended_preset.fps_low != null && (() => {
+                        const diff = (scaleFps(result.recommended_preset.fps_low) ?? 0) - result.recommended_preset.fps_low
+                        return <FpsDelta $positive={diff >= 0}>{diff >= 0 ? '+' : ''}{diff} fps vs 1080p</FpsDelta>
+                      })()}
+                    </FpsValueWrap>
+                    <FpsSub>{t('spec.fps_low_sub')}</FpsSub>
+                  </FpsBox>
+                  <FpsBox $variant="avg">
+                    <FpsLabel>⌀ Average</FpsLabel>
+                    <FpsValueWrap>
+                      <FpsValue $variant="avg">
+                        {fmtFps(scaleFps(result.recommended_preset.fps_avg))}
+                        {result.recommended_preset.fps_avg != null && <FpsUnit>fps</FpsUnit>}
+                      </FpsValue>
+                      {selectedRes !== '1080p' && result.recommended_preset.fps_avg != null && (() => {
+                        const diff = (scaleFps(result.recommended_preset.fps_avg) ?? 0) - result.recommended_preset.fps_avg
+                        return <FpsDelta $positive={diff >= 0}>{diff >= 0 ? '+' : ''}{diff} fps vs 1080p</FpsDelta>
+                      })()}
+                    </FpsValueWrap>
+                    <FpsSub>{t('spec.fps_avg_sub')}</FpsSub>
+                  </FpsBox>
+                  <FpsBox $variant="high">
+                    <FpsLabel>Peak High</FpsLabel>
+                    <FpsValueWrap>
+                      <FpsValue $variant="high">
+                        {fmtFps(scaleFps(result.recommended_preset.fps_high))}
+                        {result.recommended_preset.fps_high != null && <FpsUnit>fps</FpsUnit>}
+                      </FpsValue>
+                      {selectedRes !== '1080p' && result.recommended_preset.fps_high != null && (() => {
+                        const diff = (scaleFps(result.recommended_preset.fps_high) ?? 0) - result.recommended_preset.fps_high
+                        return <FpsDelta $positive={diff >= 0}>{diff >= 0 ? '+' : ''}{diff} fps vs 1080p</FpsDelta>
+                      })()}
+                    </FpsValueWrap>
+                    <FpsSub>{t('spec.fps_high_sub')}</FpsSub>
+                  </FpsBox>
+                </FpsGrid>
+
+                {/* Alternate presets */}
+                {result.alternate_presets && result.alternate_presets.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.45)', marginTop: 14, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      {t('spec.other_presets')}
+                    </div>
+                    <FpsPresetBar>
+                      {result.alternate_presets.map((ap, i) => (
+                        <FpsPresetChip key={i}>
+                          {ap.preset} — avg <strong>{fmtFps(scaleFps(ap.fps_avg))}</strong> fps
+                          {ap.fps_low != null && ` (low ${fmtFps(scaleFps(ap.fps_low))})`}
+                        </FpsPresetChip>
+                      ))}
+                    </FpsPresetBar>
+                  </>
+                )}
+              </FpsSection>
+
+              {/* Settings Detail */}
+              {result.settings && (() => {
+                const adapted = getAdaptedSettings(result.settings)
+                return (
+                  <SettingsSection style={{ marginBottom: 0 }}>
+                    <FpsSectionTitle>
+                      <Settings2 size={12} />
+                      {t('spec.settings_title')}
+                      {selectedRes !== '1080p' && (
+                        <span style={{ marginLeft: 'auto', fontSize: 10, color: '#a78bfa', fontWeight: 700, padding: '2px 8px', background: 'rgba(124,58,237,0.15)', borderRadius: 20, border: '1px solid rgba(124,58,237,0.3)' }}>
+                          @ {selectedRes}
+                        </span>
+                      )}
+                    </FpsSectionTitle>
+                    <SettingsTable>
+                      {[
+                        ['📐 ' + t('spec.resolution'), adapted.resolution],
+                        ['🎮 ' + t('spec.overall_preset'), adapted.overall_preset],
+                        ['🖼️ ' + t('spec.texture'), adapted.texture_quality],
+                        ['🌑 ' + t('spec.shadow'), adapted.shadow_quality],
+                        ['✨ ' + t('spec.anti_aliasing'), adapted.anti_aliasing],
+                        ['🔭 ' + t('spec.view_distance'), adapted.view_distance],
+                        ['💥 ' + t('spec.effects'), adapted.effects_quality],
+                        ['🔒 ' + t('spec.vsync'), adapted.v_sync],
+                        ...(adapted.ray_tracing ? [['🌟 ' + t('spec.ray_tracing'), adapted.ray_tracing]] : []),
+                      ].map(([key, val]) => (
+                        <SettingsRow key={key}>
+                          <SettingsKey>{key}</SettingsKey>
+                          <SettingsVal $level={val}>{val}</SettingsVal>
+                        </SettingsRow>
+                      ))}
+                    </SettingsTable>
+                  </SettingsSection>
+                )
+              })()}
+            </ResultGrid>
+
+            {/* Tips — full width below the grid */}
             {result.tips && result.tips.length > 0 && (
               <TipsSection>
                 <FpsSectionTitle>

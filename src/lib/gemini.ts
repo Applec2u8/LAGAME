@@ -24,16 +24,16 @@ export interface GeminiKey {
  * Generate content using the assigned provider for 'game_edit' feature.
  * Falls back through all available keys automatically.
  */
-export async function generateGameData(prompt: string, modelOverride?: string): Promise<any> {
-  const text = await generateText('game_edit', prompt, modelOverride)
+export async function generateGameData(prompt: string, modelOverride?: string, categoryOverride?: 'gemini' | 'groq'): Promise<any> {
+  const text = await generateText('game_edit', prompt, modelOverride, categoryOverride as any)
   return parseAIResponse(text)
 }
 
 /**
  * Generate content for the game detail page AI feature.
  */
-export async function generateGameDetails(prompt: string, modelOverride?: string): Promise<any> {
-  const text = await generateText('game_details', prompt, modelOverride)
+export async function generateGameDetails(prompt: string, modelOverride?: string, categoryOverride?: 'gemini' | 'groq'): Promise<any> {
+  const text = await generateText('game_details', prompt, modelOverride, categoryOverride as any)
   return parseAIResponse(text)
 }
 

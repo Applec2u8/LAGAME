@@ -377,9 +377,10 @@ async function runWithKeys(
 export async function generateText(
   feature: FeatureKey,
   prompt: string,
-  modelOverride?: string
+  modelOverride?: string,
+  categoryOverride?: ProviderCategory
 ): Promise<string> {
-  const category = await getRoutedCategory(feature)
+  const category = categoryOverride ?? await getRoutedCategory(feature)
   const keys = await getAvailableKeys(category)
 
   if (keys.length === 0) {

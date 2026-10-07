@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages, Share2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -53,6 +53,8 @@ export default function GameDetailPage() {
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [copied, setCopied] = useState(false)
+  const [showOriginalDesc, setShowOriginalDesc] = useState(false)
+  const [showOriginalReqs, setShowOriginalReqs] = useState(false)
 
   // Mark all possible listing pages so that if the user goes back to any of them, it restores their specific scroll.
   useEffect(() => {
@@ -177,7 +179,11 @@ export default function GameDetailPage() {
         <Hero>
           <div>
             {game.cover_image
-              ? <CoverImg src={game.cover_image} alt={game.title} />
+              ? <CoverImg
+                  src={game.cover_image.split('#')[0]}
+                  alt={game.title}
+                  $orient={game.cover_image.includes('#portrait') ? 'portrait' : 'landscape'}
+                />
               : <CoverPlaceholder>🎮</CoverPlaceholder>
             }
           </div>
@@ -217,7 +223,7 @@ export default function GameDetailPage() {
             {game.description && <Description translate="yes">{game.description.slice(0, 400)}{game.description.length > 400 ? '...' : ''}</Description>}
 
             {/* Download Links */}
-            <SectionTitle><Download size={15} /> {t('game.download_links')}</SectionTitle>
+            <SectionTitle translate="no"><Download size={15} /> {t('game.download_links')}</SectionTitle>
             {(game as any).is_coming_soon ? (
               <ComingSoonBadge>
                 <div style={{ fontSize: 36 }}>🚀</div>
@@ -289,7 +295,7 @@ export default function GameDetailPage() {
         {/* Video Trailer */}
         {game.video_url && getYoutubeId(game.video_url) && (
           <Section>
-            <SectionTitle><Play size={15} /> {t('game.trailer')}</SectionTitle>
+            <SectionTitle translate="no"><Play size={15} /> {t('game.trailer')}</SectionTitle>
             <div style={{ width: '100%', aspectRatio: '16/9', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
               <iframe
                 width="100%" height="100%"
@@ -303,7 +309,7 @@ export default function GameDetailPage() {
         {/* Screenshots */}
         {game.screenshots?.length > 0 && (
           <Section>
-            <SectionTitle>📸 {t('game.screenshots')}</SectionTitle>
+            <SectionTitle translate="no">📸 {t('game.screenshots')}</SectionTitle>
             <GalleryWrap>
               <GalleryScroll>
                 {game.screenshots.map((src, i) => (
@@ -317,7 +323,7 @@ export default function GameDetailPage() {
         {/* System Requirements */}
         {sr && (
           <Section translate="yes" key={`sysreq-${locale}`}>
-            <SectionTitle>
+            <SectionTitle translate="no">
               <Monitor size={15} /> {t('game.system_requirements')}
               {isTranslating ? (
                 <span style={{ marginLeft: '12px', fontSize: 11, color: '#7c3aed', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', animation: 'pulse 1.5s infinite' }}>
@@ -325,23 +331,30 @@ export default function GameDetailPage() {
                 </span>
               ) : locale !== 'en' ? (
                 <button
-                  onClick={retriggerTranslation}
-                  title="Click to re-translate"
+                  onClick={() => {
+                    if (showOriginalReqs) {
+                      setShowOriginalReqs(false)
+                      setTimeout(retriggerTranslation, 50)
+                    } else {
+                      setShowOriginalReqs(true)
+                    }
+                  }}
+                  title={showOriginalReqs ? 'แปลภาษา (Translate)' : 'ดูภาษาต้นฉบับ (Original)'}
                   style={{
                     marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5,
                     fontSize: 11, color: 'rgba(124,58,237,0.85)', fontWeight: 600,
                     textTransform: 'uppercase', letterSpacing: '0.5px',
-                    background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
-                    borderRadius: 6, padding: '3px 8px', cursor: 'pointer', transition: 'all 0.2s'
+                    background: 'transparent', border: 'none', outline: 'none',
+                    padding: '3px 8px', cursor: 'pointer', transition: 'all 0.2s'
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.22)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
+                  onMouseEnter={e => (e.currentTarget.style.color = 'rgba(124,58,237,1)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(124,58,237,0.85)')}
                 >
-                  <Languages size={12} /> Google Translate ↻
+                  <Languages size={12} /> {showOriginalReqs ? 'GOOGLE TRANSLATE ↻' : 'ORIGINAL TEXT ↺'}
                 </button>
               ) : null}
             </SectionTitle>
-            <SpecGrid>
+            <SpecGrid translate={showOriginalReqs ? 'no' : 'yes'} key={`reqs-${locale}-${showOriginalReqs}`}>
               <SpecCard>
                 <SpecTitle><Cpu size={12} /> {t('game.minimum')}</SpecTitle>
                 {sr.minimum?.about && <div style={{ fontSize: 14, color: 'rgba(226,232,240,0.9)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{sr.minimum.about}</div>}
@@ -359,8 +372,8 @@ export default function GameDetailPage() {
 
         {/* Full Description */}
         {game.description && (
-          <Section translate="yes" key={`desc-${locale}`}>
-            <SectionTitle>
+          <Section translate={showOriginalDesc ? "no" : "yes"} key={`desc-${locale}-${showOriginalDesc}`}>
+            <SectionTitle translate="no">
               <AlignLeft size={15} /> {t('game.about')}
               {isTranslating ? (
                 <span style={{ marginLeft: '12px', fontSize: 11, color: '#7c3aed', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', animation: 'pulse 1.5s infinite' }}>
@@ -368,19 +381,27 @@ export default function GameDetailPage() {
                 </span>
               ) : locale !== 'en' ? (
                 <button
-                  onClick={retriggerTranslation}
-                  title="Click to re-translate"
+                  onClick={() => {
+                    if (showOriginalDesc) {
+                      setShowOriginalDesc(false)
+                      // Small delay to let React render with translate="yes" before firing GT
+                      setTimeout(retriggerTranslation, 50)
+                    } else {
+                      setShowOriginalDesc(true)
+                    }
+                  }}
+                  title={showOriginalDesc ? 'แปลภาษา (Translate)' : 'ดูภาษาต้นฉบับ (Original)'}
                   style={{
                     marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5,
                     fontSize: 11, color: 'rgba(124,58,237,0.85)', fontWeight: 600,
                     textTransform: 'uppercase', letterSpacing: '0.5px',
-                    background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)',
-                    borderRadius: 6, padding: '3px 8px', cursor: 'pointer', transition: 'all 0.2s'
+                    background: 'transparent', border: 'none', outline: 'none',
+                    padding: '3px 8px', cursor: 'pointer', transition: 'all 0.2s'
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.22)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.1)')}
+                  onMouseEnter={e => (e.currentTarget.style.color = 'rgba(124,58,237,1)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(124,58,237,0.85)')}
                 >
-                  <Languages size={12} /> Google Translate ↻
+                  <Languages size={12} /> {showOriginalDesc ? 'GOOGLE TRANSLATE ↻' : 'ORIGINAL TEXT ↺'}
                 </button>
               ) : null}
             </SectionTitle>

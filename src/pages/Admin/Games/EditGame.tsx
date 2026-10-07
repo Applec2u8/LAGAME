@@ -1,19 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from 'styled-components'
-import { ArrowLeft, Save, Loader2, Plus, Minus, CheckCircle, AlertCircle, Image, Edit2, Search, Bot } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, Plus, Minus, CheckCircle, AlertCircle, Image, Edit2, Search, Bot, Database } from 'lucide-react'
 import { supabase, uploadImage } from '../../../lib/supabase'
 import ScreenshotSorter from '../../../components/ScreenshotSorter/ScreenshotSorter'
 import type { Category } from '../../../lib/supabase'
 import MultiSelectCategory from '../../../components/MultiSelectCategory'
 import { generateGameData } from '../../../lib/gemini'
 import { fetchSteamGridDbImages } from '../../../lib/steamgriddb'
+import { upsertGameGeneration } from '../../../lib/gameGenerations'
+import type { GameGenerationRecord } from '../../../lib/gameGenerations'
 import AiAutoFillCard from '../../../components/AiAutoFill/AiAutoFillCard'
+import type { CacheFieldSelection } from '../../../components/AiAutoFill/AiAutoFillCard'
+import CoverImagePicker from '../../../components/CoverImagePicker/CoverImagePicker'
+import type { CoverOrientation } from '../../../components/CoverImagePicker/CoverImagePicker'
+import { useFormDraft } from '../../../hooks/useFormDraft'
 import {
   AdminPage, PageHeader, PageTitle, BackBtn,
   Card, SectionLabel,
   Field, Label, Input, TextArea, Select,
-  PrimaryBtn, IconBtn,
+  PrimaryBtn, SecondaryBtn, IconBtn,
   Alert
 } from '../adminStyles'
 
@@ -65,14 +71,25 @@ const FetchBtn = styled.button`
   cursor: pointer; white-space: nowrap; transition: opacity 0.2s;
   &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; }
 `
-const CoverPreview = styled.div`
-  margin-top: 10px; width: 140px; height: 196px; border-radius: 8px; overflow: hidden;
-  border: 1px solid rgba(124,58,237,0.3); background: rgba(8,8,16,0.8);
-`
-const CoverImg = styled.img`width: 100%; height: 100%; object-fit: cover;`
 
 
 type LinkItem = { id?: string; cloud_name: string; url: string; platform?: string }
+
+interface EditGameDraft {
+  title: string
+  description: string
+  fileSize: string
+  videoUrl: string
+  coverImage: string
+  screenshots: string[]
+  categoryIds: string[]
+  isFeatured: boolean
+  isComingSoon: boolean
+  platforms: string[]
+  minAbout: string
+  recAbout: string
+  links: LinkItem[]
+}
 
 export default function EditGame() {
   const { id } = useParams()
@@ -97,34 +114,33 @@ export default function EditGame() {
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [steamAutoLoading, setSteamAutoLoading] = useState(false)
+  const [draftToast, setDraftToast] = useState(false)
+  const draftToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dbLoadedRef = useRef(false) // prevents draft from overwriting just-loaded DB data
   // Upload state — files are staged locally, uploaded only on Save
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
   const [pendingScreenshotFiles, setPendingScreenshotFiles] = useState<Map<string, File>>(new Map())
-  const [coverImgError, setCoverImgError] = useState(false)
-  const [coverImgSrc, setCoverImgSrc] = useState('')
+  const [coverOrientation, setCoverOrientation] = useState<CoverOrientation>('portrait')
 
   const [aiQuery, setAiQuery] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState('')
   const [aiPreview, setAiPreview] = useState<any>(null)
   const [isApplying, setIsApplying] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('gemini-flash-latest')
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('la_game_last_ai_model') || 'gemini:gemini-flash-latest')
 
   const handlePasteCover = async () => {
     try {
       const text = await navigator.clipboard.readText()
       const url = text.trim()
       if (url && (url.startsWith('http') || url.startsWith('/'))) {
-        setCoverImage(url); setPendingCoverFile(null); setCoverImgError(false)
+        setCoverImage(url); setPendingCoverFile(null)
       } else { alert('ไม่พบ URL รูปภาพใน Clipboard') }
     } catch { alert('ไม่สามารถอ่าน Clipboard ได้') }
   }
 
-  // Sync cover preview src + reset error when URL changes
-  useEffect(() => {
-    setCoverImgSrc(coverImage)
-    setCoverImgError(false)
-  }, [coverImage])
+
+
 
   const handlePasteScreenshot = async () => {
     try {
@@ -143,7 +159,6 @@ export default function EditGame() {
     const localUrl = URL.createObjectURL(file)
     setCoverImage(localUrl)
     setPendingCoverFile(file)
-    setCoverImgError(false)
     e.target.value = ''
   }
 
@@ -238,41 +253,44 @@ export default function EditGame() {
         if (sgdbImages.screenshots.length > 0) screenshots = sgdbImages.screenshots
       } catch { /* SGDB unavailable in local dev - fall through */ }
 
-      // 2. Cover fallback: Steam CDN (try portrait first, then header)
+      const libraryAssetUrl = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`
+      let hasLibraryAsset = false
       if (!cover) {
-        cover = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`
+        hasLibraryAsset = await new Promise((resolve) => {
+          const img = new window.Image()
+          img.onload = () => resolve(true)
+          img.onerror = () => resolve(false)
+          img.src = libraryAssetUrl
+        })
+      }
+
+      // 2. Fetch from Steam API via our own proxy (works in Vite dev & Cloudflare Pages)
+      try {
+        const res = await fetch(`/steam-proxy/api/appdetails?appids=${appId}`)
+        if (res.ok) {
+          const steamData = await res.json()
+          const appData = steamData[appId]?.data
+          
+          if (appData) {
+            if (screenshots.length === 0 && appData.screenshots?.length > 0) {
+              screenshots = appData.screenshots.map((s: any) => s.path_full)
+            }
+            if (!cover && appData.header_image) {
+              cover = hasLibraryAsset ? libraryAssetUrl : appData.header_image
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Steam proxy failed:', err)
+      }
+
+      // 3. Cover fallback
+      if (!cover) {
+        cover = hasLibraryAsset ? libraryAssetUrl : `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`
       }
       setCoverImage(cover)
-      setCoverImgError(false)
-
-      // 3. Screenshots: try CORS proxy to get real screenshot list from Steam API
-      if (screenshots.length === 0) {
-        const steamApiUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=screenshots`
-        const proxies = [
-          `https://corsproxy.io/?url=${encodeURIComponent(steamApiUrl)}`,
-          `https://api.allorigins.win/get?url=${encodeURIComponent(steamApiUrl)}`,
-          `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(steamApiUrl)}`,
-        ]
-        for (const proxyUrl of proxies) {
-          try {
-            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) })
-            if (!res.ok) continue
-            const raw = await res.json()
-            // allorigins wraps in { contents: "..." }
-            const steamData = typeof raw?.contents === 'string' ? JSON.parse(raw.contents) : raw
-            const appData = steamData[appId]?.data
-            if (appData?.screenshots?.length > 0) {
-              screenshots = appData.screenshots.map((s: any) =>
-                (s.path_full as string).replace(/\\/g, '')
-              )
-              break
-            }
-          } catch { /* try next proxy */ }
-        }
-      }
 
       // 4. Last-resort: use Steam Store page header + capsule images as screenshots
-      // These are guaranteed to exist if the appId is valid
       if (screenshots.length === 0) {
         screenshots = [
           `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`,
@@ -287,7 +305,6 @@ export default function EditGame() {
     } catch (err) {
       console.error('Failed to fetch Steam media:', err)
       setCoverImage(`https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`)
-      setCoverImgError(false)
     } finally {
       setSteamAutoLoading(false)
     }
@@ -315,7 +332,15 @@ export default function EditGame() {
 IMPORTANT: Please try your best to provide the accurate 'steam_app_id' if the game exists on Steam.
 Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
 
-      const data = await generateGameData(prompt, selectedModel)
+      let provider: any = undefined;
+      let modelOverride = selectedModel;
+      if (selectedModel.includes(':')) {
+        const parts = selectedModel.split(':');
+        provider = parts[0] as 'gemini' | 'groq';
+        modelOverride = parts.slice(1).join(':');
+      }
+
+      const data = await generateGameData(prompt, modelOverride, provider)
       setAiPreview(data)
     } catch (e: any) {
       console.error(e)
@@ -428,7 +453,76 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
       if (newCategoryIds.length > 0) setCategoryIds(prev => [...new Set([...prev, ...newCategoryIds])])
     }
 
+    // Save to game_generations cache
+    try {
+      await upsertGameGeneration({
+        game_title: aiPreview.title || aiQuery.trim(),
+        genres: aiPreview.genres || [],
+        platforms: aiPreview.platforms || [],
+        file_size: aiPreview.file_size || '',
+        description: aiPreview.description || '',
+        cover_image: steamCover || aiPreview.cover_image || '',
+        screenshots: steamScreenshots.length > 0 ? steamScreenshots : (aiPreview.screenshots || []),
+        video_url: realTrailer,
+        minimum_requirements: aiPreview.minimum_requirements || '',
+        recommended_requirements: aiPreview.recommended_requirements || '',
+        steam_app_id: steamAppId || null,
+        is_featured: aiPreview.is_featured === true,
+        cached_download_links: links.filter(l => l.url.trim()).length > 0
+          ? links.map(l => ({ cloud_name: l.cloud_name, url: l.url.trim(), platform: l.platform || 'windows' }))
+          : null
+      })
+    } catch (err) {
+      console.error('Failed to cache generation:', err)
+    }
+
     setIsApplying(false)
+    setAiPreview(null)
+  }
+
+  const handleApplyCache = async (record: GameGenerationRecord, fields: CacheFieldSelection) => {
+    if (fields.title) { setTitle(record.game_title); if (record.game_title) setSlug(slugify(record.game_title)) }
+    if (fields.description && record.description) setDescription(record.description)
+    if (fields.size && record.file_size) setFileSize(record.file_size)
+    if (record.video_url) setVideoUrl(record.video_url)
+    if (fields.size && record.minimum_requirements) setMinAbout(record.minimum_requirements)
+    if (fields.size && record.recommended_requirements) setRecAbout(record.recommended_requirements)
+    if (fields.platform && record.platforms?.length) setPlatforms(record.platforms)
+    if (fields.images) {
+      if (record.cover_image) setCoverImage(record.cover_image)
+      if (record.screenshots?.length) setScreenshots(record.screenshots)
+    }
+    if (fields.links) {
+      if (record.cached_download_links?.length) {
+        setLinks(record.cached_download_links)
+      } else if (record.platforms?.length) {
+        const hasWindows = record.platforms.includes('windows')
+        if (!hasWindows) {
+          const consolePriority = ['ps4', 'ps5', 'ps3', 'ps2', 'switch', 'xbox']
+          const mainConsole = consolePriority.find((c: string) => record.platforms.includes(c))
+          if (mainConsole) setLinks(prev => prev.map(l => ({ ...l, platform: `emul-${mainConsole}` })))
+        }
+      }
+    }
+    if (record.is_featured) setIsFeatured(true)
+    if (fields.genres && record.genres?.length) {
+      const newCategoryIds: string[] = []
+      for (const gName of record.genres) {
+        const existing = categories.find(c => c.name.toLowerCase() === gName.toLowerCase())
+        if (existing) {
+          newCategoryIds.push(existing.id)
+        } else {
+          try {
+            const { data } = await supabase.from('categories').insert({ name: gName, slug: slugify(gName) } as any).select().single()
+            if (data) {
+              setCategories(prev => [...prev, data as Category].sort((a, b) => a.name.localeCompare(b.name)))
+              newCategoryIds.push((data as Category).id)
+            }
+          } catch (e) { console.error('Failed to create category', e) }
+        }
+      }
+      if (newCategoryIds.length > 0) setCategoryIds(prev => [...new Set([...prev, ...newCategoryIds])])
+    }
     setAiPreview(null)
   }
 
@@ -443,7 +537,19 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
       setCategories((cats as any) || [])
       if (game) {
         const g = game as any
-        setTitle(g.title); setSlug(g.slug); setDescription(g.description || ''); setCoverImage(g.cover_image || ''); setIsFeatured(g.is_featured); setIsComingSoon(g.is_coming_soon || false)
+        setTitle(g.title); setSlug(g.slug); setDescription(g.description || ''); setIsFeatured(g.is_featured); setIsComingSoon(g.is_coming_soon || false)
+        if (g.cover_image) {
+          const parts = g.cover_image.split('#')
+          setCoverImage(parts[0])
+          if (parts[1] === 'landscape' || parts[1] === 'portrait') {
+            setCoverOrientation(parts[1] as CoverOrientation)
+          } else {
+            setCoverOrientation('portrait')
+          }
+        } else {
+          setCoverImage('')
+          setCoverOrientation('portrait')
+        }
         setFileSize(g.file_size || '')
         setVideoUrl(g.video_url || '')
         setCategoryIds(g.category_ids || (g.category_id ? [g.category_id] : []))
@@ -468,9 +574,47 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
       }) : [{ cloud_name: 'Google Drive', url: '', platform: 'windows' }];
       setLinks(parsedLinks)
       setLoading(false)
+      dbLoadedRef.current = true // mark DB data as loaded; draft can now be applied
     }
     if (id) load()
   }, [id])
+
+  // ── Draft persistence (per game ID) ───────────────────────────────
+  const { clearDraft } = useFormDraft<EditGameDraft>({
+    storageKey: `la_game_draft_editgame_${id}`,
+    state: { title, description, fileSize, videoUrl, coverImage, screenshots, categoryIds, isFeatured, isComingSoon, platforms, minAbout, recAbout, links },
+    onRestore: (draft) => {
+      // Wait until DB data has loaded before applying draft (avoids race condition)
+      const applyDraft = () => {
+        if (draft.title) setTitle(draft.title)
+        if (draft.description) setDescription(draft.description)
+        if (draft.fileSize) setFileSize(draft.fileSize)
+        if (draft.videoUrl) setVideoUrl(draft.videoUrl)
+        if (draft.coverImage) setCoverImage(draft.coverImage)
+        if (draft.screenshots?.length) setScreenshots(draft.screenshots)
+        if (draft.categoryIds?.length) setCategoryIds(draft.categoryIds)
+        if (typeof draft.isFeatured === 'boolean') setIsFeatured(draft.isFeatured)
+        if (typeof draft.isComingSoon === 'boolean') setIsComingSoon(draft.isComingSoon)
+        if (draft.platforms?.length) setPlatforms(draft.platforms)
+        if (draft.minAbout) setMinAbout(draft.minAbout)
+        if (draft.recAbout) setRecAbout(draft.recAbout)
+        if (draft.links?.length) setLinks(draft.links)
+        draftToastTimer.current = setTimeout(() => {
+          setDraftToast(true)
+          draftToastTimer.current = setTimeout(() => setDraftToast(false), 4000)
+        }, 200)
+      }
+      // If DB already loaded (fast connection), apply now; else wait
+      if (dbLoadedRef.current) {
+        applyDraft()
+      } else {
+        const waitForLoad = setInterval(() => {
+          if (dbLoadedRef.current) { clearInterval(waitForLoad); applyDraft() }
+        }, 100)
+        setTimeout(() => clearInterval(waitForLoad), 5000) // max 5s wait
+      }
+    },
+  })
 
   const addLink = () => setLinks(l => [...l, { cloud_name: 'Google Drive', url: '', platform: 'windows' }])
   const removeLink = (i: number) => setLinks(l => l.filter((_, idx) => idx !== i))
@@ -527,51 +671,60 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
   }
 
 
+  const performSave = async (): Promise<{ finalCover: string; finalScreenshots: string[] }> => {
+    // Upload staged cover file if any
+    let finalCover = coverImage
+    if (pendingCoverFile) {
+      finalCover = await uploadImage(pendingCoverFile)
+      URL.revokeObjectURL(coverImage)
+    }
+    if (finalCover) {
+      finalCover = finalCover.split('#')[0] + `#${coverOrientation}`
+    }
+
+    // Upload staged screenshot files
+    const finalScreenshots = await Promise.all(
+      screenshots.map(async url => {
+        const file = pendingScreenshotFiles.get(url)
+        if (file) {
+          const uploaded = await uploadImage(file)
+          URL.revokeObjectURL(url)
+          return uploaded
+        }
+        return url
+      })
+    )
+
+    await (supabase.from('games') as any).update({
+      title, slug, description, cover_image: finalCover || null,
+      category_id: categoryIds[0] || null, category_ids: categoryIds.length > 0 ? categoryIds : null,
+      is_featured: isFeatured, screenshots: finalScreenshots,
+      is_coming_soon: isComingSoon,
+      file_size: fileSize || null,
+      video_url: videoUrl || null,
+      system_requirements: {
+        platforms,
+        minimum: { about: minAbout },
+        recommended: { about: recAbout },
+      },
+      updated_at: new Date().toISOString(),
+    }).eq('id', id!)
+
+    await supabase.from('download_links').delete().eq('game_id', id!)
+    const validLinks = links.filter(l => l.url.trim())
+    if (validLinks.length > 0) {
+      await supabase.from('download_links').insert(validLinks.map((l, i) => ({ game_id: id!, cloud_name: `[${l.platform || 'windows'}] ${l.cloud_name}`, url: l.url.trim(), sort_order: i })) as any)
+    }
+
+    return { finalCover, finalScreenshots }
+  }
+
   const handleSave = async () => {
     if (!title.trim() || !id) return
     setSaving(true); setSaveMsg(null)
     try {
-      // Upload staged cover file if any
-      let finalCover = coverImage
-      if (pendingCoverFile) {
-        finalCover = await uploadImage(pendingCoverFile)
-        URL.revokeObjectURL(coverImage)
-      }
-
-      // Upload staged screenshot files
-      const finalScreenshots = await Promise.all(
-        screenshots.map(async url => {
-          const file = pendingScreenshotFiles.get(url)
-          if (file) {
-            const uploaded = await uploadImage(file)
-            URL.revokeObjectURL(url)
-            return uploaded
-          }
-          return url
-        })
-      )
-
-      await (supabase.from('games') as any).update({
-        title, slug, description, cover_image: finalCover || null,
-        category_id: categoryIds[0] || null, category_ids: categoryIds.length > 0 ? categoryIds : null,
-        is_featured: isFeatured, screenshots: finalScreenshots,
-        is_coming_soon: isComingSoon,
-        file_size: fileSize || null,
-        video_url: videoUrl || null,
-        system_requirements: {
-          platforms,
-          minimum: { about: minAbout },
-          recommended: { about: recAbout },
-        },
-        updated_at: new Date().toISOString(),
-      }).eq('id', id!)
-
-      await supabase.from('download_links').delete().eq('game_id', id)
-      const validLinks = links.filter(l => l.url.trim())
-      if (validLinks.length > 0) {
-        await supabase.from('download_links').insert(validLinks.map((l, i) => ({ game_id: id, cloud_name: `[${l.platform || 'windows'}] ${l.cloud_name}`, url: l.url.trim(), sort_order: i })) as any)
-      }
-
+      await performSave()
+      clearDraft()
       setSaveMsg({ type: 'success', text: 'Game updated successfully!' })
       setTimeout(() => navigate('/ap-admin/games'), 1200)
     } catch (e: any) {
@@ -579,6 +732,42 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     }
     setSaving(false)
   }
+
+  const handleSaveAndUpdateCache = async () => {
+    if (!title.trim() || !id) return
+    setSaving(true); setSaveMsg(null)
+    try {
+      const { finalCover, finalScreenshots } = await performSave()
+
+      // Update master cache record
+      await upsertGameGeneration({
+        game_title: title.trim(),
+        genres: categories.filter(c => categoryIds.includes(c.id)).map(c => c.name),
+        platforms,
+        file_size: fileSize || '',
+        description: description || '',
+        cover_image: finalCover || '',
+        screenshots: finalScreenshots,
+        video_url: videoUrl || '',
+        minimum_requirements: minAbout || '',
+        recommended_requirements: recAbout || '',
+        steam_app_id: null,
+        is_featured: isFeatured,
+        cached_download_links: links.filter(l => l.url.trim()).length > 0
+          ? links.map(l => ({ cloud_name: l.cloud_name, url: l.url.trim(), platform: l.platform || 'windows' }))
+          : null
+      })
+
+      clearDraft()
+      setSaveMsg({ type: 'success', text: 'Game updated & master cache synced! ✓' })
+      setTimeout(() => navigate('/ap-admin/games'), 1400)
+    } catch (e: any) {
+      setSaveMsg({ type: 'error', text: e.message || 'Failed to update' })
+    }
+    setSaving(false)
+  }
+
+
 
   if (loading) return <Loader2 />
 
@@ -601,6 +790,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
           selectedModel={selectedModel} setSelectedModel={setSelectedModel}
           aiLoading={aiLoading} isApplying={isApplying} aiError={aiError} aiPreview={aiPreview}
           onGenerate={handleAiGenerate} onApply={handleAiApply} onCancel={() => setAiPreview(null)}
+          onApplyCache={handleApplyCache}
         />
 
         <SectionLabel>📋 Basic Info</SectionLabel>
@@ -649,8 +839,8 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
             <FetchBtn type="button" onClick={handleSteamSearchTab} style={{ padding: '6px 12px', background: 'rgba(236,72,153,0.2)', border: '1px solid rgba(236,72,153,0.4)', color: '#f472b6', flex: '1 1 auto', justifyContent: 'center' }}>
               <Search size={14} /> ค้นหา (Manual)
             </FetchBtn>
-            <FetchBtn type="button" onClick={handleSteamManualFetch} style={{ padding: '6px 12px', background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4', flex: '1 1 auto', justifyContent: 'center' }}>
-              📋 กรอก URL เอง
+            <FetchBtn type="button" onClick={handleSteamManualFetch} disabled={steamAutoLoading} style={{ padding: '6px 12px', background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4', flex: '1 1 auto', justifyContent: 'center' }}>
+              {steamAutoLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : '📋'} กรอก URL เอง
             </FetchBtn>
           </div>
         </div>
@@ -695,7 +885,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         <Field>
           <Label>Cover Image URL (or Upload)</Label>
           <FetchRow>
-            <Input value={coverImage} onChange={e => { setCoverImage(e.target.value); setPendingCoverFile(null); setCoverImgError(false) }} style={{ flex: 1 }} />
+            <Input value={coverImage} onChange={e => { setCoverImage(e.target.value); setPendingCoverFile(null) }} style={{ flex: 1 }} />
             <FetchBtn onClick={handlePasteCover} style={{ padding: '10px 14px', background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)' }} title="วาง URL จาก Clipboard">
               📋 วาง
             </FetchBtn>
@@ -705,28 +895,11 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
               <input type="file" accept="image/*" hidden onChange={handleUploadCover} />
             </UploadBtn>
           </FetchRow>
-          {coverImage && !coverImgError && (
-            <CoverPreview>
-              <CoverImg
-                src={coverImgSrc}
-                alt="cover"
-                onLoad={() => setCoverImgError(false)}
-                onError={() => {
-                  const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(coverImage)}`
-                  if (coverImgSrc !== proxy) {
-                    setCoverImgSrc(proxy)
-                  } else {
-                    setCoverImgError(true)
-                  }
-                }}
-              />
-            </CoverPreview>
-          )}
-          {coverImage && coverImgError && (
-            <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, fontSize: 12, color: '#f87171' }}>
-              ⚠️ ไม่สามารถโหลดรูปได้ — ลองใช้ปุ่ม "เลือกไฟล์" หรือวาง URL อื่นแทนครับ
-            </div>
-          )}
+          <CoverImagePicker
+            src={coverImage.split('#')[0]}
+            orientation={coverOrientation}
+            onOrientationChange={setCoverOrientation}
+          />
         </Field>
 
         <Field>
@@ -804,11 +977,49 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         </datalist>
         <AddLinkBtn onClick={addLink}><Plus size={14} /> Add Link</AddLinkBtn>
 
-        <PrimaryBtn onClick={handleSave} disabled={saving} style={{ width: '100%', justifyContent: 'center', marginTop: 24 }}>
-          {saving ? <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Save size={16} />}
-          {saving ? 'Saving...' : 'Save Changes'}
-        </PrimaryBtn>
+        <div style={{ display: 'flex', gap: 12, marginTop: 24, flexWrap: 'wrap' }}>
+          <PrimaryBtn onClick={handleSave} disabled={saving} style={{ flex: 1, minWidth: 180, justifyContent: 'center' }}>
+            {saving ? <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Save size={16} />}
+            {saving ? 'Saving...' : 'Save Changes Only'}
+          </PrimaryBtn>
+          <SecondaryBtn onClick={handleSaveAndUpdateCache} disabled={saving} style={{ flex: 1, minWidth: 220, justifyContent: 'center' }}>
+            {saving ? <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Database size={16} />}
+            {saving ? 'Saving...' : 'Save & Update Master Cache'}
+          </SecondaryBtn>
+          <button
+            onClick={() => { clearDraft(); setDraftToast(false) }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 16px', background: 'rgba(248,113,113,0.1)',
+              border: '1px solid rgba(248,113,113,0.3)', borderRadius: 10,
+              color: '#f87171', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              transition: 'all 0.2s', whiteSpace: 'nowrap',
+            }}
+            title="Discard unsaved draft from localStorage"
+          >
+            🗑️ Clear Draft
+          </button>
+        </div>
       </Card>
+
+      {/* ── Draft-Restored Toast ───────────────────────────── */}
+      {draftToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+          background: 'linear-gradient(135deg, rgba(124,58,237,0.95), rgba(6,182,212,0.95))',
+          backdropFilter: 'blur(12px)', borderRadius: 14,
+          padding: '14px 20px', color: '#fff', fontSize: 13, fontWeight: 600,
+          display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          animation: 'slideInRight 0.3s ease', maxWidth: 340,
+        }}>
+          <span style={{ fontSize: 18 }}>💾</span>
+          <div>
+            <div>Draft Restored</div>
+            <div style={{ fontWeight: 400, fontSize: 11, opacity: 0.85, marginTop: 2 }}>Unsaved changes from last session recovered.</div>
+          </div>
+          <button onClick={() => setDraftToast(false)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 16, opacity: 0.7, padding: 4 }}>✕</button>
+        </div>
+      )}
     </AdminPage>
   )
 }

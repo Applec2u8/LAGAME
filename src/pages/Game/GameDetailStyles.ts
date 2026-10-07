@@ -19,11 +19,16 @@ export const Hero = styled.div`
   @media (max-width: 600px) { grid-template-columns: 1fr; gap: 20px; }
 `
 
-export const CoverImg = styled.img`
+export const CoverImg = styled.img<{ $orient?: 'portrait' | 'landscape' }>`
   width: 100%; border-radius: 16px;
   border: 1px solid rgba(124,58,237,0.2);
   box-shadow: 0 0 40px rgba(124,58,237,0.2);
   transition: transform 0.3s;
+  ${p => p.$orient === 'portrait' && `
+    aspect-ratio: 3/4;
+    object-fit: cover;
+    object-position: center;
+  `}
 `
 
 export const CoverPlaceholder = styled.div`

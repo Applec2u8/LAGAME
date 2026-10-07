@@ -315,6 +315,7 @@ const th: TranslationMap = {
   // Top Games
   'top.title': 'เกมยอดนิยม (Top PC Games)',
   'top.subtitle': '10 เกมที่ดีที่สุดโดยคัดจาก AI',
+  'game.system_requirements': 'ข้อกำหนดของระบบ',
   'game.minimum': 'ขั้นต่ำ',
   'game.recommended': 'แนะนำ',
   'game.about': 'เกี่ยวกับเกมนี้',
