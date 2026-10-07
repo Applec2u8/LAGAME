@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import styled from 'styled-components'
-import { Plus, Trash2, Loader2, Key, CheckCircle, Clock, Eye, EyeOff, Copy, X, AlertTriangle, ChevronUp, Activity } from 'lucide-react'
+import { Plus, Trash2, Loader2, Key, CheckCircle, Clock, Eye, EyeOff, Copy, X, AlertTriangle, ChevronUp, Activity, Route } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import type { GeminiKey } from '../../../lib/gemini'
+import { getAllRoutings, saveRouting } from '../../../lib/aiProvider'
+import type { ProviderCategory, FeatureKey, RoutingRecord } from '../../../lib/aiProvider'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import {
   AdminPage, PageHeader, PageTitle, PageSubTitle,
@@ -106,13 +108,21 @@ const AddFormGrid = styled.div`
   @media (max-width: 700px) { grid-template-columns: 1fr; }
 `
 
+const RoutingGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  @media (max-width: 700px) { grid-template-columns: 1fr; }
+`
+
 export default function ManageApiKeys() {
   const [keys, setKeys] = useState<GeminiKey[]>([])
+  const [routings, setRoutings] = useState<RoutingRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [formName, setFormName] = useState('')
   const [formKey, setFormKey] = useState('')
-  const [formCategory, setFormCategory] = useState('gemini')
+  const [formCategory, setFormCategory] = useState<ProviderCategory>('gemini')
   const [formModel, setFormModel] = useState('gemini-flash-latest')
   const [showKey, setShowKey] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -122,12 +132,18 @@ export default function ManageApiKeys() {
   const [testResults, setTestResults] = useState<Record<string, { status: 'success' | 'error', message: string }>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
 
-  useEffect(() => { fetchKeys() }, [])
+  useEffect(() => {
+    fetchData()
+  }, [])
 
-  const fetchKeys = async () => {
+  const fetchData = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('gemini_api_keys').select('*').order('created_at', { ascending: true })
-    if (!error && data) setKeys(data as GeminiKey[])
+    const { data: keysData, error: keysError } = await supabase.from('gemini_api_keys').select('*').order('created_at', { ascending: true })
+    if (!keysError && keysData) setKeys(keysData as GeminiKey[])
+
+    const routingsData = await getAllRoutings()
+    setRoutings(routingsData)
+    
     setLoading(false)
   }
 
@@ -139,8 +155,12 @@ export default function ManageApiKeys() {
     })
     setSaving(false)
     if (!error) {
-      setShowForm(false); setFormName(''); setFormKey('')
-      fetchKeys()
+      setShowForm(false)
+      setFormName('')
+      setFormKey('')
+      setFormCategory('gemini')
+      setFormModel('gemini-flash-latest')
+      fetchData()
     } else {
       alert('Error saving key: ' + error.message)
     }
@@ -149,17 +169,17 @@ export default function ManageApiKeys() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this API key?')) return
     await (supabase as any).from('gemini_api_keys').delete().eq('id', id)
-    fetchKeys()
+    fetchData()
   }
 
   const handleToggleActive = async (id: string, current: boolean) => {
     await (supabase as any).from('gemini_api_keys').update({ is_active: !current }).eq('id', id)
-    fetchKeys()
+    fetchData()
   }
 
   const handleClearCooldown = async (id: string) => {
     await (supabase as any).from('gemini_api_keys').update({ cooldown_until: null }).eq('id', id)
-    fetchKeys()
+    fetchData()
   }
 
   const handleCopy = (text: string, id: string) => {
@@ -167,9 +187,14 @@ export default function ManageApiKeys() {
     setCopied(id)
     setTimeout(() => setCopied(null), 2000)
   }
+
+  const handleRoutingChange = async (feature: FeatureKey, category: ProviderCategory) => {
+    await saveRouting(feature, category)
+    fetchData()
+  }
   
   const handleTestKey = async (key: GeminiKey) => {
-    if (key.category !== 'gemini') {
+    if (key.category !== 'gemini' && key.category !== 'groq') {
       setTestResults(prev => ({...prev, [key.id]: { status: 'success', message: 'Ready' }}))
       return;
     }
@@ -178,16 +203,33 @@ export default function ManageApiKeys() {
     setExpandedKey(key.id)
     
     try {
-      const genAI = new GoogleGenerativeAI(key.api_key)
-      const model = genAI.getGenerativeModel({ model: key.model || 'gemini-flash-latest' })
-      await model.generateContent('ping')
+      if (key.category === 'gemini') {
+        const genAI = new GoogleGenerativeAI(key.api_key)
+        const model = genAI.getGenerativeModel({ model: key.model || 'gemini-flash-latest' })
+        await model.generateContent('ping')
+      } else if (key.category === 'groq') {
+        const testModel = key.model || 'openai/gpt-oss-20b';
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key.api_key}` },
+          body: JSON.stringify({ model: testModel, messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 })
+        })
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          const errorMessage = errorData.error?.message || errorData.message || res.statusText || 'Unknown error';
+          throw new Error(`Groq error ${res.status}: ${errorMessage}`);
+        }
+      }
+      
       setTestResults(prev => ({...prev, [key.id]: { status: 'success', message: 'API Key is working perfectly.' }}))
+      alert(`✅ Success: API Key '${key.name}' is working perfectly!`)
       
       if (key.cooldown_until) {
         await handleClearCooldown(key.id)
       }
     } catch (e: any) {
       setTestResults(prev => ({...prev, [key.id]: { status: 'error', message: e.message || 'Unknown API Error' }}))
+      alert(`❌ Test Failed: ${e.message}`)
     } finally {
       setTesting(prev => ({...prev, [key.id]: false}))
     }
@@ -212,16 +254,33 @@ export default function ManageApiKeys() {
   
   const categories = Object.keys(groupedKeys).sort();
 
+  const getFeatureCategory = (feature: FeatureKey) => {
+    const r = routings.find(x => x.feature === feature)
+    return r ? r.category : 'gemini'
+  }
+
+  const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const cat = e.target.value as ProviderCategory;
+    setFormCategory(cat);
+    if (cat === 'groq') {
+      setFormModel('openai/gpt-oss-20b');
+    } else if (cat === 'gemini') {
+      setFormModel('gemini-flash-latest');
+    } else {
+      setFormModel('');
+    }
+  };
+
   return (
     <AdminPage>
       <PageHeader>
         <div>
           <PageTitle>
             <Key size={26} style={{ color: '#f59e0b' }} />
-            API Keys Manager
+            API Keys & Routing
           </PageTitle>
           <PageSubTitle>
-            The system auto-rotates between active keys. Keys on cooldown are skipped automatically.
+            Manage keys and assign which provider to use for each platform feature.
           </PageSubTitle>
         </div>
         <PrimaryBtn onClick={() => setShowForm(v => !v)}>
@@ -229,6 +288,47 @@ export default function ManageApiKeys() {
           {showForm ? 'Cancel' : 'Add Key'}
         </PrimaryBtn>
       </PageHeader>
+
+      {/* Routing Configuration */}
+      <Card style={{ marginBottom: 24 }}>
+        <CardHeader>
+          <CardTitle><Route size={16} style={{ color: '#06b6d4' }} /> Feature Routing Configuration</CardTitle>
+        </CardHeader>
+        <RoutingGrid>
+          <Field>
+            <Label>Chatbot Assistant</Label>
+            <Select value={getFeatureCategory('chatbot')} onChange={e => handleRoutingChange('chatbot', e.target.value as ProviderCategory)}>
+              <option value="gemini">Gemini</option>
+              <option value="groq">Groq</option>
+            </Select>
+            <Hint>Powers the main chatbot window.</Hint>
+          </Field>
+          <Field>
+            <Label>Game Details Page</Label>
+            <Select value={getFeatureCategory('game_details')} onChange={e => handleRoutingChange('game_details', e.target.value as ProviderCategory)}>
+              <option value="gemini">Gemini</option>
+              <option value="groq">Groq</option>
+            </Select>
+            <Hint>Used for AI autofill when users view games.</Hint>
+          </Field>
+          <Field>
+            <Label>Game Editing / Management</Label>
+            <Select value={getFeatureCategory('game_edit')} onChange={e => handleRoutingChange('game_edit', e.target.value as ProviderCategory)}>
+              <option value="gemini">Gemini</option>
+              <option value="groq">Groq</option>
+            </Select>
+            <Hint>AI autofill in the admin panel.</Hint>
+          </Field>
+          <Field>
+            <Label>AI Global Ranking</Label>
+            <Select value={getFeatureCategory('ai_ranking')} onChange={e => handleRoutingChange('ai_ranking', e.target.value as ProviderCategory)}>
+              <option value="gemini">Gemini</option>
+              <option value="groq">Groq</option>
+            </Select>
+            <Hint>Analyzes trending games.</Hint>
+          </Field>
+        </RoutingGrid>
+      </Card>
 
       {/* Add Form */}
       {showForm && (
@@ -239,8 +339,9 @@ export default function ManageApiKeys() {
           <AddFormGrid>
             <Field>
               <Label>Category</Label>
-              <Select value={formCategory} onChange={e => setFormCategory(e.target.value)}>
-                <option value="gemini">Gemini Agent</option>
+              <Select value={formCategory} onChange={handleCategoryChange}>
+                <option value="gemini">Gemini API</option>
+                <option value="groq">Groq API</option>
                 <option value="steamgriddb">SteamGridDB</option>
                 <option value="other">Other</option>
               </Select>
@@ -267,16 +368,25 @@ export default function ManageApiKeys() {
                   {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              <Hint>Your key is stored securely and never exposed to the frontend.</Hint>
+              <Hint>Stored securely and never exposed to the frontend.</Hint>
             </Field>
             <Field>
               <Label>Default Model</Label>
-              <Select value={formModel} onChange={e => setFormModel(e.target.value)}>
-                <option value="gemini-flash-latest">gemini-flash-latest</option>
-                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                <option value="gemini-pro-latest">gemini-pro-latest</option>
-              </Select>
+              {formCategory === 'groq' ? (
+                <Select value={formModel} onChange={e => setFormModel(e.target.value)}>
+                  <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+                  <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+                </Select>
+              ) : formCategory === 'gemini' ? (
+                <Select value={formModel} onChange={e => setFormModel(e.target.value)}>
+                  <option value="gemini-flash-latest">gemini-flash-latest</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                  <option value="gemini-pro-latest">gemini-pro-latest</option>
+                </Select>
+              ) : (
+                <Input placeholder="N/A" value={formModel} onChange={e => setFormModel(e.target.value)} disabled />
+              )}
             </Field>
           </AddFormGrid>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
@@ -306,9 +416,10 @@ export default function ManageApiKeys() {
               <CategorySection key={category}>
                 <CategoryTitle>
                   {category === 'gemini' && <Activity size={18} style={{color: '#8b5cf6'}}/>}
+                  {category === 'groq' && <Activity size={18} style={{color: '#ef4444'}}/>}
                   {category === 'steamgriddb' && <Key size={18} style={{color: '#10b981'}}/>}
                   {category === 'other' && <Key size={18} style={{color: '#64748b'}}/>}
-                  {category === 'steamgriddb' ? 'SteamGridDB' : category === 'other' ? 'Other APIs' : 'Gemini Agent'} Keys
+                  {category === 'steamgriddb' ? 'SteamGridDB' : category === 'other' ? 'Other APIs' : category === 'groq' ? 'Groq' : 'Gemini'} Keys
                 </CategoryTitle>
                 <KeyRowHead>
                   <div>Name</div>
@@ -330,7 +441,7 @@ export default function ManageApiKeys() {
                         <div>
                           <div style={{ fontWeight: 600, color: '#e2e8f0', fontSize: 14 }}>{key.name}</div>
                           <div style={{ fontSize: 12, color: 'rgba(148,163,184,0.4)', marginTop: 3 }}>
-                            {key.model && key.category === 'gemini' ? key.model : 'Standard Key'}
+                            {key.model && (key.category === 'gemini' || key.category === 'groq') ? key.model : 'Standard Key'}
                           </div>
                         </div>
                         <MobileRow>
@@ -381,7 +492,7 @@ export default function ManageApiKeys() {
                               {isExpanded ? <ChevronUp size={14} /> : <AlertTriangle size={14} />}
                             </IconBtn>
                           )}
-                          {category === 'gemini' && (
+                          {(category === 'gemini' || category === 'groq') && (
                             <IconBtn 
                               onClick={() => handleTestKey(key)} 
                               title="Test API Key"

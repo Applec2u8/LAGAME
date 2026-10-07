@@ -1,5 +1,9 @@
 // Cloudflare Pages Function — POST /api/chat
 // Runs server-side on Cloudflare Edge — API keys are NEVER exposed to the client
+//
+// Multi-provider support: Gemini REST + Groq OpenAI-compatible API
+// Routing: reads `api_key_routing` table for 'chatbot' feature → category
+// Key rotation: automatically falls back through all available keys on 429/quota errors
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -16,6 +20,8 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Content-Type': 'application/json',
 }
+
+// ─── System prompt ──────────────────────────────────────────────────────────
 
 function buildSystemPrompt(gameCount: number, totalViews: number): string {
   return `You are Labot 🤖, a friendly AI assistant for LAPACK Game Hub (la-pack-game.pages.dev) — a free PC game download platform from Laos 🇱🇦.
@@ -71,8 +77,86 @@ Detect the user's language and always reply in the SAME language.
 Use appropriate emojis to make responses feel warm and engaging. Keep answers concise unless more detail is needed.`
 }
 
-// Try calling Gemini REST API with a given key
-async function callGemini(apiKey: string, model: string, systemPrompt: string, messages: ChatMessage[]): Promise<string> {
+// ─── Supabase helpers ────────────────────────────────────────────────────────
+
+async function supabaseFetch(
+  supabaseUrl: string,
+  supabaseKey: string,
+  path: string,
+  opts?: RequestInit
+): Promise<any> {
+  const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+      ...(opts?.headers || {})
+    }
+  })
+  if (!res.ok && opts?.method !== 'PATCH') return null
+  const text = await res.text()
+  try { return JSON.parse(text) } catch { return null }
+}
+
+// ─── Routing lookup ──────────────────────────────────────────────────────────
+
+async function getRoutedCategory(
+  supabaseUrl: string,
+  supabaseKey: string,
+  feature: string
+): Promise<string> {
+  try {
+    const data = await supabaseFetch(
+      supabaseUrl,
+      supabaseKey,
+      `api_key_routing?feature=eq.${feature}&select=category&limit=1`
+    )
+    if (Array.isArray(data) && data[0]?.category) return data[0].category
+  } catch (_) {}
+  return 'gemini'
+}
+
+// ─── Key helpers ─────────────────────────────────────────────────────────────
+
+async function getAvailableKeys(
+  supabaseUrl: string,
+  supabaseKey: string,
+  category: string
+): Promise<any[]> {
+  const data = await supabaseFetch(
+    supabaseUrl,
+    supabaseKey,
+    `gemini_api_keys?is_active=eq.true&category=eq.${encodeURIComponent(category)}&order=created_at.asc`
+  )
+  const now = Date.now()
+  return (Array.isArray(data) ? data : []).filter(
+    (k: any) => !k.cooldown_until || new Date(k.cooldown_until).getTime() < now
+  )
+}
+
+async function setCooldown(
+  supabaseUrl: string,
+  supabaseKey: string,
+  id: string,
+  durationMs: number
+): Promise<void> {
+  const until = new Date(Date.now() + durationMs).toISOString()
+  await supabaseFetch(supabaseUrl, supabaseKey, `gemini_api_keys?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ cooldown_until: until })
+  })
+}
+
+// ─── Provider calls ───────────────────────────────────────────────────────────
+
+async function callGemini(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: ChatMessage[]
+): Promise<string> {
   const geminiContents = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }]
@@ -91,17 +175,59 @@ async function callGemini(apiKey: string, model: string, systemPrompt: string, m
 
   const data: any = await res.json()
 
-  if (res.status === 429 || data.error?.code === 429) {
+  if (res.status === 429 || data.error?.code === 429 || data.error?.message?.includes('Quota')) {
     throw new Error('QUOTA_EXCEEDED')
   }
-  if (data.error) {
-    throw new Error(data.error.message || 'Gemini error')
-  }
+  if (data.error) throw new Error(data.error.message || 'Gemini error')
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('EMPTY_RESPONSE')
   return text
 }
+
+async function callGroq(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  messages: ChatMessage[]
+): Promise<string> {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: model || 'openai/gpt-oss-20b',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))
+      ],
+      temperature: 0.75,
+      max_tokens: 1024
+    })
+  })
+
+  const data: any = await res.json()
+
+  if (res.status === 429 || data.error?.code === 'rate_limit_exceeded') {
+    throw new Error('QUOTA_EXCEEDED')
+  }
+  if (!res.ok || data.error) throw new Error(data.error?.message || `Groq error ${res.status}`)
+
+  const text = data.choices?.[0]?.message?.content
+  if (!text) throw new Error('EMPTY_RESPONSE')
+  return text
+}
+
+// ─── Error classification ─────────────────────────────────────────────────────
+
+function isQuotaError(e: any): boolean {
+  const msg = (e?.message || '').toLowerCase()
+  return msg.includes('quota_exceeded') || msg.includes('quota') || msg.includes('exhausted') || msg.includes('rate_limit')
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
 
 export async function onRequestPost(context: any) {
   try {
@@ -112,32 +238,22 @@ export async function onRequestPost(context: any) {
       return new Response(JSON.stringify({ error: 'invalid_request' }), { status: 400, headers: CORS })
     }
 
-    // Read Supabase credentials from Cloudflare env vars
-    // (Set these in Cloudflare Pages → Settings → Environment Variables)
-    const supabaseUrl = context.env?.VITE_SUPABASE_URL
-      || 'https://srwttqkjygzraqqnqesl.supabase.co'
-    const supabaseKey = context.env?.VITE_SUPABASE_ANON_KEY
-      || 'sb_publishable_NLXFd5_OjpsSXzG7McF3Vg_Li9XKwKS'
+    const supabaseUrl = context.env?.VITE_SUPABASE_URL || 'https://srwttqkjygzraqqnqesl.supabase.co'
+    const supabaseKey = context.env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_NLXFd5_OjpsSXzG7McF3Vg_Li9XKwKS'
 
-    // Fetch active Gemini API keys from Supabase
-    let keys: any[] = []
-    try {
-      const keysRes = await fetch(
-        `${supabaseUrl}/rest/v1/gemini_api_keys?is_active=eq.true&order=created_at.asc`,
-        { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
-      )
-      keys = await keysRes.json()
-    } catch (e) {
-      console.error('Supabase fetch failed:', e)
+    // 1. Determine which provider category to use for chatbot
+    const category = await getRoutedCategory(supabaseUrl, supabaseKey, 'chatbot')
+
+    // 2. Get available keys for that category
+    let keys = await getAvailableKeys(supabaseUrl, supabaseKey, category)
+
+    // 3. Graceful fallback: if routed category has no keys, try gemini
+    if (keys.length === 0 && category !== 'gemini') {
+      console.warn(`[chat] No keys for category "${category}", falling back to gemini`)
+      keys = await getAvailableKeys(supabaseUrl, supabaseKey, 'gemini')
     }
 
-    // Filter out keys that are on cooldown
-    const now = Date.now()
-    const available = (Array.isArray(keys) ? keys : []).filter((k: any) =>
-      !k.cooldown_until || new Date(k.cooldown_until).getTime() < now
-    )
-
-    if (available.length === 0) {
+    if (keys.length === 0) {
       return new Response(JSON.stringify({
         error: 'quota_exceeded',
         message: '⏳ ระบบยุ่งชั่วคราว / หมด token แล้ว กรุณาลองใหม่ภายหลัง\n\nThe system is temporarily out of capacity. Please try again later. 🙏'
@@ -145,38 +261,33 @@ export async function onRequestPost(context: any) {
     }
 
     const systemPrompt = buildSystemPrompt(gameCount, totalViews)
+    const effectiveCategory = keys[0].category || category
 
-    // Try each key sequentially
-    for (let i = 0; i < available.length; i++) {
-      const keyRecord = available[i]
-      const model = keyRecord.model || 'gemini-2.0-flash'
+    // 4. Try each key sequentially with rotation/fallback
+    for (let i = 0; i < keys.length; i++) {
+      const keyRecord = keys[i]
+      const model = keyRecord.model || (effectiveCategory === 'groq' ? 'openai/gpt-oss-20b' : 'gemini-2.0-flash')
 
       try {
-        const reply = await callGemini(keyRecord.api_key, model, systemPrompt, messages)
+        let reply: string
+
+        if (effectiveCategory === 'groq') {
+          reply = await callGroq(keyRecord.api_key, model, systemPrompt, messages)
+        } else {
+          reply = await callGemini(keyRecord.api_key, model, systemPrompt, messages)
+        }
+
         return new Response(JSON.stringify({ reply }), { headers: CORS })
 
       } catch (e: any) {
-        if (e.message === 'QUOTA_EXCEEDED') {
-          // Put this key on cooldown (24h)
-          const cooldownTime = new Date()
-          cooldownTime.setHours(cooldownTime.getHours() + 24)
-          try {
-            await fetch(`${supabaseUrl}/rest/v1/gemini_api_keys?id=eq.${keyRecord.id}`, {
-              method: 'PATCH',
-              headers: {
-                apikey: supabaseKey,
-                Authorization: `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json',
-                Prefer: 'return=minimal'
-              },
-              body: JSON.stringify({ cooldown_until: cooldownTime.toISOString() })
-            })
-          } catch (_) {}
-          // Continue to next key
+        if (isQuotaError(e)) {
+          // 24-hour cooldown
+          await setCooldown(supabaseUrl, supabaseKey, keyRecord.id, 24 * 60 * 60 * 1000)
+          console.warn(`[chat] Key "${keyRecord.name}" hit quota — cooled down 24h`)
           continue
         }
-        // Non-quota error: try next key if available
-        if (i === available.length - 1) throw e
+        // Non-quota: try next key
+        if (i === keys.length - 1) throw e
       }
     }
 
@@ -187,6 +298,7 @@ export async function onRequestPost(context: any) {
     }), { status: 429, headers: CORS })
 
   } catch (e: any) {
+    console.error('[chat] Unhandled error:', e)
     return new Response(JSON.stringify({
       error: 'server_error',
       message: '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง\n\nSomething went wrong. Please try again.'

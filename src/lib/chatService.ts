@@ -1,67 +1,28 @@
-﻿/**
+/**
  * chatService.ts
  *
- * Abstracts the Gemini chat call:
- * Uses @google/generative-ai to avoid 400/403 format errors.
+ * Public API for chat — routes through aiProvider.ts which handles:
+ *  - Feature → provider routing (reads api_key_routing table)
+ *  - Multi-key rotation & fallback (429 / quota / transient errors)
+ *  - Gemini + Groq support
  */
-import { supabase } from './supabase'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { executeAIChat } from './aiProvider'
+import type { ChatTurn } from './aiProvider'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   attachments?: {
     type: 'image' | 'audio'
-    data: string // Base64 data (without data:image/... prefix)
+    data: string // Base64 (without data:... prefix)
     mimeType: string
   }[]
 }
 
-// -- Cache SDK instances per API key (avoids re-initializing on every request) --
-const sdkCache = new Map<string, GoogleGenerativeAI>()
-function getGenAI(apiKey: string): GoogleGenerativeAI {
-  if (!sdkCache.has(apiKey)) {
-    sdkCache.set(apiKey, new GoogleGenerativeAI(apiKey))
-  }
-  return sdkCache.get(apiKey)!
-}
+// ─── System prompt ──────────────────────────────────────────────────────────
 
-// -- Classify transient/cold-start errors that are safe to retry --
-function isTransientError(e: any): boolean {
-  if (!e) return false
-  const msg = (e.message || '').toLowerCase()
-  return (
-    msg.includes('failed to fetch') ||
-    msg.includes('networkerror') ||
-    msg.includes('network error') ||
-    msg.includes('503') ||
-    msg.includes('502') ||
-    msg.includes('empty_response') ||
-    msg.includes('load failed') ||
-    msg.includes('connection') ||
-    e.name === 'TypeError'
-  )
-}
-
-// -- Auto-retry wrapper --
-// Silently retries once on transient errors with a 1.5 s delay.
-// The user sees a normal loading spinner - never a first-attempt error bubble.
-async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 1500): Promise<T> {
-  try {
-    return await fn()
-  } catch (e: any) {
-    if (e.name === 'AbortError' || e.message?.includes('QUOTA_EXCEEDED')) throw e
-    if (retries > 0 && isTransientError(e)) {
-      await new Promise(r => setTimeout(r, delayMs))
-      return withRetry(fn, retries - 1, delayMs)
-    }
-    throw e
-  }
-}
-
-// -- System prompt --
 function buildSystemPrompt(gameCount: number, totalViews: number, pageTitle?: string): string {
-  const basePrompt = `You are Labot, a friendly AI assistant for LA-GAME (la-game.pages.dev) - a free PC game download platform from Laos.
+  const base = `You are Labot, a friendly AI assistant for LA-GAME (la-game.pages.dev) - a free PC game download platform from Laos.
 
 YOUR ROLE:
 - Be a warm, friendly guide for website visitors
@@ -91,115 +52,62 @@ STATS: ${gameCount} games available, ${totalViews.toLocaleString()} total views
 LANGUAGE: Reply in the SAME language the user writes in (Thai/Lao/English). Be friendly and use emojis occasionally.`
 
   if (pageTitle) {
-    return basePrompt + `\n\nCURRENT CONTEXT: The user is currently viewing the page: "${pageTitle}". If they ask "Can my PC run this game?" or refer to "this game", assume they are talking about the game on this page.`
+    return (
+      base +
+      `\n\nCURRENT CONTEXT: The user is viewing: "${pageTitle}". If they ask about "this game" assume it is the game on this page.`
+    )
   }
-  return basePrompt
+  return base
 }
 
-// -- Core call (browser to Gemini API directly) --
-async function chatDev(messages: ChatMessage[], gameCount: number, totalViews: number, abortSignal?: AbortSignal): Promise<string> {
-  const { data: keys } = await (supabase as any)
-    .from('gemini_api_keys')
-    .select('*')
-    .eq('is_active', true)
-    .order('created_at', { ascending: true })
+// ─── Auto-retry for cold-start / transient network blips ────────────────────
 
-  const now = Date.now()
-  const available = ((keys as any[]) || []).filter((k: any) =>
-    !k.cooldown_until || new Date(k.cooldown_until).getTime() < now
-  )
-
-  if (available.length === 0) {
-    throw new Error('QUOTA_EXCEEDED')
-  }
-
-  const systemPrompt = buildSystemPrompt(gameCount, totalViews, typeof document !== 'undefined' ? document.title : undefined)
-  
-  // Normalize history: strictly alternate user/model, skip empty/error messages
-  const normalizedContents: any[] = []
-  let lastRole = ''
-
-  for (const m of messages) {
-    if (!m.content || m.content.trim() === '') continue
-    if ((m as any)._isError) continue
-
-    const role = m.role === 'assistant' ? 'model' : 'user'
-    const parts: any[] = [{ text: m.content }]
-    if (m.attachments) {
-      for (const att of m.attachments) {
-        parts.push({ inlineData: { data: att.data, mimeType: att.mimeType } })
-      }
+async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 1500): Promise<T> {
+  try {
+    return await fn()
+  } catch (e: any) {
+    if (e.name === 'AbortError' || e.message?.includes('QUOTA_EXCEEDED')) throw e
+    const msg = (e.message || '').toLowerCase()
+    const isTransient =
+      msg.includes('failed to fetch') ||
+      msg.includes('networkerror') ||
+      msg.includes('503') ||
+      msg.includes('502') ||
+      msg.includes('load failed') ||
+      e.name === 'TypeError'
+    if (retries > 0 && isTransient) {
+      await new Promise(r => setTimeout(r, delayMs))
+      return withRetry(fn, retries - 1, delayMs)
     }
-    
-    if (role === lastRole) {
-      const lastMsg = normalizedContents[normalizedContents.length - 1]
-      lastMsg.parts[0].text += '\n\n' + m.content
-      if (m.attachments) {
-        for (const att of m.attachments) {
-          lastMsg.parts.push({ inlineData: { data: att.data, mimeType: att.mimeType } })
-        }
-      }
-    } else {
-      normalizedContents.push({ role, parts })
-      lastRole = role
-    }
+    throw e
   }
-  
-  // Gemini requires conversation to start with 'user'
-  if (normalizedContents.length > 0 && normalizedContents[0].role !== 'user') {
-    normalizedContents.shift()
-  }
-
-  for (let i = 0; i < available.length; i++) {
-    const keyRecord = available[i]
-    
-    try {
-      // Use cached SDK instance - no re-handshake overhead
-      const genAI = getGenAI(keyRecord.api_key)
-      const modelStr = keyRecord.model || 'gemini-flash-latest'
-      const model = genAI.getGenerativeModel({ 
-        model: modelStr,
-        systemInstruction: systemPrompt 
-      })
-
-      // withRetry handles cold-start / network blips silently
-      const text = await withRetry(async () => {
-        if (abortSignal?.aborted) {
-          throw Object.assign(new Error('AbortError'), { name: 'AbortError' })
-        }
-        const result = await model.generateContent({
-          contents: normalizedContents,
-          generationConfig: { temperature: 0.75, maxOutputTokens: 2048 }
-        }, { signal: abortSignal })
-        const t = result.response.text()
-        if (!t) throw new Error('EMPTY_RESPONSE')
-        return t
-      })
-
-      return text
-
-    } catch (e: any) {
-      if (e.name === 'AbortError' || abortSignal?.aborted) {
-        throw e
-      }
-
-      if (e.message?.includes('429') || e.message?.includes('Quota') || e.message?.toLowerCase().includes('exhausted')) {
-        const cooldownTime = new Date()
-        cooldownTime.setHours(cooldownTime.getHours() + 24)
-        await (supabase as any).from('gemini_api_keys').update({ cooldown_until: cooldownTime.toISOString() }).eq('id', keyRecord.id)
-      }
-      
-      if (i === available.length - 1) throw e
-    }
-  }
-
-  throw new Error('QUOTA_EXCEEDED')
 }
 
-// -- Public API --
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 export async function sendChatMessage(
   messages: ChatMessage[],
-  opts: { gameCount: number; totalViews: number; pageTitle?: string; abortSignal?: AbortSignal }
+  opts: {
+    gameCount: number
+    totalViews: number
+    pageTitle?: string
+    abortSignal?: AbortSignal
+  }
 ): Promise<string> {
-  return chatDev(messages, opts.gameCount, opts.totalViews, opts.abortSignal)
+  const systemPrompt = buildSystemPrompt(opts.gameCount, opts.totalViews, opts.pageTitle)
+
+  // Map ChatMessage → ChatTurn (aiProvider format)
+  const turns: ChatTurn[] = messages
+    .filter(m => m.content?.trim() && !(m as any)._isError)
+    .map(m => ({
+      role: m.role,
+      content: m.content,
+      attachments: m.attachments
+    }))
+
+  return withRetry(
+    () => executeAIChat('chatbot', systemPrompt, turns, opts.abortSignal),
+    1,
+    1500
+  )
 }

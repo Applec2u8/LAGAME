@@ -5,8 +5,9 @@ import {
   CheckCircle, AlertTriangle, XCircle, Gauge, Settings2, Lightbulb,
   Monitor, Languages, TrendingUp
 } from 'lucide-react'
-import { generateGameData } from '../../lib/gemini'
+import { generateGameDetails } from '../../lib/gemini'
 import type { Game } from '../../lib/supabase'
+import { getActiveModelInfo } from '../../lib/aiProvider'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
 
 // ══════════════════════════════════════════════════════════════
@@ -683,7 +684,7 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 Note: fps_low=1% low, fps_avg=average, fps_high=peak. ${!hasGpu ? "If no GPU is specified, ASSUME the user is using the integrated/onboard graphics of the specified CPU (e.g. Radeon Graphics, Intel Iris Xe, UHD). Estimate realistic FPS for the CPU's integrated graphics." : "Estimate realistic FPS based on known benchmarks for this GPU+game combo."}`
 
-  const result = await generateGameData(prompt)
+  const result = await generateGameDetails(prompt)
   return result as SpecResult
 }
 
@@ -703,6 +704,16 @@ export default function PCSpecChecker({ game }: Props) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<SpecResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeModel, setActiveModel] = useState<string>('AI')
+
+  useEffect(() => {
+    getActiveModelInfo('game_details').then(info => {
+      let name = info.model;
+      if (name.includes('gpt-oss')) name = 'gpt-oss (groq)';
+      else if (name.includes('flash')) name = 'gemini-flash';
+      setActiveModel(name);
+    }).catch(console.error);
+  }, [])
 
   const canAnalyze = cpu.trim().length > 0 || gpu.trim().length > 0 || ram.trim().length > 0
 
@@ -806,7 +817,10 @@ export default function PCSpecChecker({ game }: Props) {
               <Search size={11} />{t('spec.search_or')}
               <strong className='w-auto' style={{ color: 'rgba(124,58,237,0.7)' }}>{t('spec.type_own')}</strong>
             </span>
-            <span className='w-auto'>{t('spec.no_need_list')}</span>
+            <span className='w-auto flex items-center gap-1'>
+              <Lightbulb size={11} style={{ color: '#f59e0b' }}/> 
+              Powered by: <span style={{ color: '#c4b5fd', fontWeight: 600 }}>{activeModel}</span>
+            </span>
           </div>
         </div>
 

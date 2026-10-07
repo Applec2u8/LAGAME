@@ -4,6 +4,7 @@ import { X, Send, Bot, ChevronDown, AlertCircle, MessageCircle, Headphones, File
 import { supabase } from '../../lib/supabase'
 import { sendChatMessage } from '../../lib/chatService'
 import type { ChatMessage } from '../../lib/chatService'
+import { getActiveModelInfo } from '../../lib/aiProvider'
 import { detectPlatform } from '../../lib/analytics'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
 
@@ -387,9 +388,20 @@ export default function ChatBot() {
   const [mode, setMode] = useState<AppMode>('ai')
   const [hasUnread, setHasUnread] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+  const [activeModelLabel, setActiveModelLabel] = useState<string>('gemini-flash')
 
   // ── Features toggles ──
   const [features, setFeatures] = useState({ enable_text: true, enable_voice: false, enable_image: false })
+
+  useEffect(() => {
+    getActiveModelInfo('chatbot').then(info => {
+      // Create a nice human readable name or just use the model name
+      let name = info.model;
+      if (name.includes('gpt-oss')) name = 'gpt-oss (groq)';
+      else if (name.includes('flash')) name = 'gemini-flash';
+      setActiveModelLabel(name);
+    }).catch(console.error)
+  }, [])
 
   // ── AI Chat state ───
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([])
@@ -1340,7 +1352,7 @@ export default function ChatBot() {
                     <InputToolbarLeft>
                       <ModelPill>
                         <span style={{ fontSize: 13 }}>✦</span>
-                        gemini-flash
+                        {activeModelLabel}
                       </ModelPill>
                       {features.enable_image && (
                         <>

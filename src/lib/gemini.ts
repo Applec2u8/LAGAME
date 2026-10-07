@@ -1,5 +1,13 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import { supabase } from './supabase'
+/**
+ * gemini.ts
+ *
+ * Backward-compatible wrapper that routes game-data generation
+ * through the new unified aiProvider (supports Gemini + Groq).
+ *
+ * Callers (AiAutoFill, game editing) continue to use `generateGameData(prompt)`
+ * — routing and fallback are handled transparently.
+ */
+import { generateText } from './aiProvider'
 
 export interface GeminiKey {
   id: string
@@ -13,114 +21,26 @@ export interface GeminiKey {
 }
 
 /**
- * Generate content using the best available Gemini API key from the database.
- * If a key returns a 429 quota error, it automatically falls back to the next key.
+ * Generate content using the assigned provider for 'game_edit' feature.
+ * Falls back through all available keys automatically.
  */
 export async function generateGameData(prompt: string, modelOverride?: string): Promise<any> {
-  // 1. Fetch all active keys
-  const { data: keys, error } = await supabase
-    .from('gemini_api_keys')
-    .select('*')
-    .eq('is_active', true)
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    console.error('Failed to fetch API keys from database:', error.message)
-    // We don't throw immediately, we'll try to fallback to .env
-  }
-
-  const now = new Date().getTime()
-  
-  // Filter keys where cooldown is null OR cooldown is in the past
-  const availableKeys = (keys as GeminiKey[] || []).filter(k => {
-    if (!k.cooldown_until) return true
-    return new Date(k.cooldown_until).getTime() < now
-  })
-
-  // Fallback to ENV key if no active keys in DB
-  const envKey = import.meta.env.VITE_GEMINI_API_KEY
-  if (availableKeys.length === 0) {
-    if (!envKey) {
-      throw new Error('No active API keys found in the database, and no fallback in .env')
-    }
-    const genAI = new GoogleGenerativeAI(envKey)
-    const modelStr = modelOverride || 'gemini-flash-latest'
-    const model = genAI.getGenerativeModel({ model: modelStr })
-    const result = await model.generateContent(prompt)
-    return parseGeminiResponse(result.response.text())
-  }
-
-  // Loop through available DB keys sequentially
-  for (let i = 0; i < availableKeys.length; i++) {
-    const keyRecord = availableKeys[i]
-    try {
-      const genAI = new GoogleGenerativeAI(keyRecord.api_key)
-      const modelStr = modelOverride || keyRecord.model || 'gemini-flash-latest'
-      const model = genAI.getGenerativeModel({ model: modelStr })
-      
-      const result = await model.generateContent(prompt)
-      return parseGeminiResponse(result.response.text())
-      
-    } catch (e: any) {
-      console.error(`Gemini API Error for key ${keyRecord.name}:`, e)
-      
-      // If quota exceeded (429) or exhausted, set cooldown
-      if (e.message?.includes('429') || e.message?.includes('Quota') || e.message?.toLowerCase().includes('exhausted')) {
-        // Set cooldown to +24 hours
-        const cooldownTime = new Date()
-        cooldownTime.setHours(cooldownTime.getHours() + 24)
-        
-        await (supabase as any)
-          .from('gemini_api_keys')
-          .update({ cooldown_until: cooldownTime.toISOString() })
-          .eq('id', keyRecord.id)
-          
-        console.warn(`Key ${keyRecord.name} is on 24h cooldown until ${cooldownTime.toISOString()}`)
-        
-        if (i === availableKeys.length - 1) {
-          throw new Error(`All available API keys have exhausted their quota. Last error: ${e.message}`)
-        }
-      } 
-      // If 503 Service Unavailable, set a short 5-minute cooldown
-      else if (e.message?.includes('503')) {
-        const cooldownTime = new Date()
-        cooldownTime.setMinutes(cooldownTime.getMinutes() + 5)
-        
-        await (supabase as any)
-          .from('gemini_api_keys')
-          .update({ cooldown_until: cooldownTime.toISOString() })
-          .eq('id', keyRecord.id)
-          
-        console.warn(`Key ${keyRecord.name} hit 503 (high demand). Cooldown for 5 mins.`)
-        
-        if (i === availableKeys.length - 1) {
-          throw new Error(`Gemini API Error (503): ${e.message || 'Service Unavailable'}`)
-        }
-      }
-      // If 400 Invalid or 403 Forbidden, permanently disable the key
-      else if (e.message?.includes('400') || e.message?.includes('API_KEY_INVALID') || e.message?.includes('403')) {
-        await (supabase as any)
-          .from('gemini_api_keys')
-          .update({ is_active: false })
-          .eq('id', keyRecord.id)
-          
-        console.error(`Key ${keyRecord.name} is invalid or forbidden (400/403). Permanently disabling.`)
-        
-        if (i === availableKeys.length - 1) {
-          throw new Error(`Gemini API Error: Invalid or forbidden API key.`)
-        }
-      }
-      // Unrelated error -> try next key just in case
-      else {
-        if (i === availableKeys.length - 1) {
-          throw new Error(`Gemini API Error: ${e.message || 'Unknown error'}`)
-        }
-      }
-    }
-  }
+  const text = await generateText('game_edit', prompt, modelOverride)
+  return parseAIResponse(text)
 }
 
-function parseGeminiResponse(text: string) {
-  const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+/**
+ * Generate content for the game detail page AI feature.
+ */
+export async function generateGameDetails(prompt: string, modelOverride?: string): Promise<any> {
+  const text = await generateText('game_details', prompt, modelOverride)
+  return parseAIResponse(text)
+}
+
+function parseAIResponse(text: string): any {
+  const clean = text
+    .replace(/```json\n?/g, '')
+    .replace(/```\n?/g, '')
+    .trim()
   return JSON.parse(clean)
 }
