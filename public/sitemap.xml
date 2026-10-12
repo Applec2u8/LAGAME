@@ -21,6 +21,48 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://example.com/game/silent-hill-f-digital-deluxe-edition</loc>
+    <lastmod>2026-10-08T05:31:40.849Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/silent-hill-townfall</loc>
+    <lastmod>2026-10-08T05:29:39.714Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/star-wars-jedi-survivor</loc>
+    <lastmod>2026-10-08T05:23:12.681Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/star-wars-outlaws-ultimate-edition</loc>
+    <lastmod>2026-10-08T05:04:09.557Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/star-wars-zero-company</loc>
+    <lastmod>2026-10-08T04:55:32.708Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/star-wars-bounty-hunter</loc>
+    <lastmod>2026-10-08T04:46:17.893Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://example.com/game/star-wars-battlefront-ultimate-edition</loc>
+    <lastmod>2026-10-08T04:43:48.036Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://example.com/game/minecraft-dungeons-v1-17-0-0-multiplayer</loc>
     <lastmod>2026-10-07T05:56:23.709Z</lastmod>
     <changefreq>weekly</changefreq>
@@ -41,18 +83,6 @@
   <url>
     <loc>https://example.com/game/elden-ring-deluxe-edition</loc>
     <lastmod>2026-09-28T21:12:07.943Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://example.com/game/silent-hill-f-digital-deluxe-edition</loc>
-    <lastmod>2026-09-28T21:11:40.482Z</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://example.com/game/silent-hill-townfall</loc>
-    <lastmod>2026-09-28T21:01:49.046Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>

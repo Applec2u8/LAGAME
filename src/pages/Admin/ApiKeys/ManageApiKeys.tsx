@@ -201,16 +201,25 @@ export default function ManageApiKeys() {
     
     setTesting(prev => ({...prev, [key.id]: true}))
     setExpandedKey(key.id)
+
+    // 15-second hard timeout — Gemini free-tier cold-start can take 8-12 s
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
     
     try {
       if (key.category === 'gemini') {
         const genAI = new GoogleGenerativeAI(key.api_key)
-        const model = genAI.getGenerativeModel({ model: key.model || 'gemini-flash-latest' })
-        await model.generateContent('ping')
+        const modelStr = key.model || 'gemini-flash-latest'
+        const model = genAI.getGenerativeModel({ model: modelStr })
+        await model.generateContent(
+          { contents: [{ role: 'user', parts: [{ text: 'ping' }] }] },
+          { signal: controller.signal }
+        )
       } else if (key.category === 'groq') {
         const testModel = key.model || 'openai/gpt-oss-20b';
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key.api_key}` },
           body: JSON.stringify({ model: testModel, messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 })
         })
@@ -228,9 +237,20 @@ export default function ManageApiKeys() {
         await handleClearCooldown(key.id)
       }
     } catch (e: any) {
-      setTestResults(prev => ({...prev, [key.id]: { status: 'error', message: e.message || 'Unknown API Error' }}))
-      alert(`❌ Test Failed: ${e.message}`)
+      // Use controller.signal.aborted — more reliable than checking e.name because the
+      // Google Generative AI SDK wraps the native AbortError inside GoogleGenerativeAIError,
+      // making e.name === 'AbortError' fail even though it IS a timeout abort.
+      const isTimeout = controller.signal.aborted
+      const message = isTimeout
+        ? `Timeout (15s): Key did not respond in time. It may be quota-exhausted or the network is slow.`
+        : (e.message || 'Unknown API Error')
+      setTestResults(prev => ({...prev, [key.id]: { status: 'error', message }}))
+      alert(isTimeout
+        ? `⏰ Timeout: Key '${key.name}' did not respond within 15 seconds.`
+        : `❌ Test Failed: ${e.message}`
+      )
     } finally {
+      clearTimeout(timeoutId)
       setTesting(prev => ({...prev, [key.id]: false}))
     }
   }
@@ -380,8 +400,8 @@ export default function ManageApiKeys() {
               ) : formCategory === 'gemini' ? (
                 <Select value={formModel} onChange={e => setFormModel(e.target.value)}>
                   <option value="gemini-flash-latest">gemini-flash-latest</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
                   <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                  <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
                   <option value="gemini-pro-latest">gemini-pro-latest</option>
                 </Select>
               ) : (

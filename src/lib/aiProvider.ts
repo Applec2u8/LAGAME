@@ -47,8 +47,10 @@ export interface ChatTurn {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const COOLDOWN_QUOTA_MS   = 24 * 60 * 60 * 1000  // 24 h
-const COOLDOWN_TRANSIENT_MS = 5 * 60 * 1000       // 5 min
+const COOLDOWN_QUOTA_MS     = 24 * 60 * 60 * 1000  // 24 h
+const COOLDOWN_TRANSIENT_MS = 5 * 60 * 1000        // 5 min
+// Stable alias used as automatic fallback when a model name returns 404
+const GEMINI_FALLBACK_MODEL = 'gemini-flash-latest'
 
 // ─── SDK cache (Gemini) ──────────────────────────────────────────────────────
 
@@ -109,21 +111,24 @@ export async function getActiveModelInfo(feature: FeatureKey): Promise<{ categor
 
 /**
  * Get all active, non-cooled-down keys for a given category.
+ *
+ * Cooldown filtering is done at the database level (lte current timestamp)
+ * to avoid JS-side race conditions where a stale in-memory snapshot could
+ * return a key that has already been cooled-down by another request.
  */
 export async function getAvailableKeys(category: ProviderCategory): Promise<ApiKeyRecord[]> {
+  const nowIso = new Date().toISOString()
   const { data, error } = await (supabase as any)
     .from('gemini_api_keys')
     .select('*')
     .eq('is_active', true)
     .eq('category', category)
+    // Only rows where cooldown_until is NULL  OR  cooldown_until <= now
+    .or(`cooldown_until.is.null,cooldown_until.lte.${nowIso}`)
     .order('created_at', { ascending: true })
 
   if (error || !data) return []
-
-  const now = Date.now()
-  return (data as ApiKeyRecord[]).filter(
-    k => !k.cooldown_until || new Date(k.cooldown_until).getTime() < now
-  )
+  return data as ApiKeyRecord[]
 }
 
 async function setCooldown(id: string, durationMs: number) {
@@ -145,15 +150,21 @@ async function disableKey(id: string) {
 
 /**
  * Call Gemini using the Google Generative AI SDK.
+ *
+ * If the stored model name is deprecated/invalid (HTTP 404) the call is
+ * automatically retried once with GEMINI_FALLBACK_MODEL so that the key
+ * itself is not wrongly penalised for a bad model name.
  */
 async function callGemini(
   key: ApiKeyRecord,
   systemPrompt: string,
   messages: ChatTurn[],
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  /** Internal flag — set to true on the fallback retry to prevent infinite recursion */
+  _isFallback = false
 ): Promise<string> {
   const genAI = getGenAI(key.api_key)
-  const modelStr = key.model || 'gemini-flash-latest'
+  const modelStr = _isFallback ? GEMINI_FALLBACK_MODEL : (key.model || GEMINI_FALLBACK_MODEL)
   const model = genAI.getGenerativeModel({
     model: modelStr,
     systemInstruction: systemPrompt
@@ -180,13 +191,25 @@ async function callGemini(
   }
   if (contents.length > 0 && contents[0].role !== 'user') contents.shift()
 
-  const result = await model.generateContent(
-    { contents, generationConfig: { temperature: 0.75, maxOutputTokens: 2048 } },
-    { signal: abortSignal }
-  )
-  const text = result.response.text()
-  if (!text) throw new Error('EMPTY_RESPONSE')
-  return text
+  try {
+    const result = await model.generateContent(
+      { contents, generationConfig: { temperature: 0.75, maxOutputTokens: 2048 } },
+      { signal: abortSignal }
+    )
+    const text = result.response.text()
+    if (!text) throw new Error('EMPTY_RESPONSE')
+    return text
+  } catch (e: any) {
+    // If the model name itself is invalid, retry once with the stable fallback alias.
+    // Do NOT do this on the fallback retry itself to avoid infinite loops.
+    if (!_isFallback && isModelNotFoundError(e)) {
+      console.warn(
+        `[aiProvider] Model "${modelStr}" returned 404 for key "${key.name}" — retrying with ${GEMINI_FALLBACK_MODEL}`
+      )
+      return callGemini(key, systemPrompt, messages, abortSignal, true)
+    }
+    throw e
+  }
 }
 
 /**
@@ -279,6 +302,22 @@ function isInvalidKeyError(e: any): boolean {
   )
 }
 
+/**
+ * True when the error indicates the MODEL name is invalid/deprecated (HTTP 404).
+ * In this case the API key itself is fine — we should retry with the fallback model
+ * rather than disabling or cooling-down the key.
+ */
+function isModelNotFoundError(e: any): boolean {
+  const msg = (e?.message || '').toLowerCase()
+  return (
+    msg.includes('404') ||
+    msg.includes('not found') ||
+    msg.includes('model not found') ||
+    msg.includes('is not found') ||
+    msg.includes('does not exist')
+  )
+}
+
 // ─── Main dispatcher ─────────────────────────────────────────────────────────
 
 /**
@@ -340,6 +379,7 @@ async function runWithKeys(
         text = await callGroq(key, systemPrompt, messages, abortSignal)
       } else {
         // 'gemini' | 'other' (try Gemini SDK for other — admin responsibility)
+        // callGemini internally retries with GEMINI_FALLBACK_MODEL on 404
         text = await callGemini(key, systemPrompt, messages, abortSignal)
       }
 
@@ -352,6 +392,11 @@ async function runWithKeys(
 
       if (isQuotaError(e)) {
         await setCooldown(key.id, COOLDOWN_QUOTA_MS)
+        // Continue to next key
+      } else if (isModelNotFoundError(e)) {
+        // Model is invalid even after fallback retry — treat as transient,
+        // not a key fault. Short cooldown so the key remains usable.
+        await setCooldown(key.id, COOLDOWN_TRANSIENT_MS)
         // Continue to next key
       } else if (isTransientError(e)) {
         await setCooldown(key.id, COOLDOWN_TRANSIENT_MS)
@@ -435,16 +480,32 @@ export async function generateText(
         return text
       } else {
         const genAI = getGenAI(key.api_key)
-        const modelStr = modelOverride || key.model || 'gemini-flash-latest'
+        const modelStr = modelOverride || key.model || GEMINI_FALLBACK_MODEL
         const model = genAI.getGenerativeModel({ model: modelStr })
-        const result = await model.generateContent(prompt)
-        const text = result.response.text()
-        if (!text) throw new Error('EMPTY_RESPONSE')
-        return text
+        try {
+          const result = await model.generateContent(prompt)
+          const text = result.response.text()
+          if (!text) throw new Error('EMPTY_RESPONSE')
+          return text
+        } catch (geminiErr: any) {
+          // Retry with stable fallback alias if the model name was rejected (404)
+          if (isModelNotFoundError(geminiErr) && modelStr !== GEMINI_FALLBACK_MODEL) {
+            console.warn(
+              `[aiProvider] generateText: model "${modelStr}" 404 for key "${key.name}" — retrying with ${GEMINI_FALLBACK_MODEL}`
+            )
+            const fallbackModel = genAI.getGenerativeModel({ model: GEMINI_FALLBACK_MODEL })
+            const result = await fallbackModel.generateContent(prompt)
+            const text = result.response.text()
+            if (!text) throw new Error('EMPTY_RESPONSE')
+            return text
+          }
+          throw geminiErr
+        }
       }
     } catch (e: any) {
       console.warn(`[aiProvider] generateText key "${key.name}" error:`, e.message)
       if (isQuotaError(e)) await setCooldown(key.id, COOLDOWN_QUOTA_MS)
+      else if (isModelNotFoundError(e)) await setCooldown(key.id, COOLDOWN_TRANSIENT_MS)
       else if (isTransientError(e)) await setCooldown(key.id, COOLDOWN_TRANSIENT_MS)
       else if (isInvalidKeyError(e)) await disableKey(key.id)
       if (i === keys.length - 1) throw e

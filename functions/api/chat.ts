@@ -125,15 +125,14 @@ async function getAvailableKeys(
   supabaseKey: string,
   category: string
 ): Promise<any[]> {
+  const nowIso = new Date().toISOString()
   const data = await supabaseFetch(
     supabaseUrl,
     supabaseKey,
-    `gemini_api_keys?is_active=eq.true&category=eq.${encodeURIComponent(category)}&order=created_at.asc`
+    // Filter cooldown_until at DB level to avoid JS-side race conditions
+    `gemini_api_keys?is_active=eq.true&category=eq.${encodeURIComponent(category)}&or=(cooldown_until.is.null,cooldown_until.lte.${encodeURIComponent(nowIso)})&order=created_at.asc`
   )
-  const now = Date.now()
-  return (Array.isArray(data) ? data : []).filter(
-    (k: any) => !k.cooldown_until || new Date(k.cooldown_until).getTime() < now
-  )
+  return Array.isArray(data) ? data : []
 }
 
 async function setCooldown(
@@ -149,20 +148,37 @@ async function setCooldown(
   })
 }
 
+async function disableKey(
+  supabaseUrl: string,
+  supabaseKey: string,
+  id: string
+): Promise<void> {
+  await supabaseFetch(supabaseUrl, supabaseKey, `gemini_api_keys?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: false })
+  })
+}
+
 // ─── Provider calls ───────────────────────────────────────────────────────────
+
+const GEMINI_CHAT_FALLBACK_MODEL = 'gemini-flash-latest'
+const COOLDOWN_QUOTA_MS     = 24 * 60 * 60 * 1000  // 24 h
+const COOLDOWN_TRANSIENT_MS = 5 * 60 * 1000        // 5 min
 
 async function callGemini(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  _isFallback = false
 ): Promise<string> {
+  const effectiveModel = _isFallback ? GEMINI_CHAT_FALLBACK_MODEL : model
   const geminiContents = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }]
   }))
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${effectiveModel}:generateContent?key=${apiKey}`
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -177,6 +193,11 @@ async function callGemini(
 
   if (res.status === 429 || data.error?.code === 429 || data.error?.message?.includes('Quota')) {
     throw new Error('QUOTA_EXCEEDED')
+  }
+  // If model name is invalid (404), retry once with stable fallback
+  if ((res.status === 404 || data.error?.code === 404) && !_isFallback) {
+    console.warn(`[chat] Model "${effectiveModel}" returned 404 — retrying with ${GEMINI_CHAT_FALLBACK_MODEL}`)
+    return callGemini(apiKey, GEMINI_CHAT_FALLBACK_MODEL, systemPrompt, messages, true)
   }
   if (data.error) throw new Error(data.error.message || 'Gemini error')
 
@@ -225,6 +246,29 @@ async function callGroq(
 function isQuotaError(e: any): boolean {
   const msg = (e?.message || '').toLowerCase()
   return msg.includes('quota_exceeded') || msg.includes('quota') || msg.includes('exhausted') || msg.includes('rate_limit')
+}
+
+function isInvalidKeyError(e: any): boolean {
+  const msg = (e?.message || '').toLowerCase()
+  return (
+    msg.includes('400') ||
+    msg.includes('403') ||
+    msg.includes('api_key_invalid') ||
+    msg.includes('invalid_api_key') ||
+    msg.includes('forbidden') ||
+    msg.includes('unauthorized')
+  )
+}
+
+function isModelNotFoundError(e: any): boolean {
+  const msg = (e?.message || '').toLowerCase()
+  return (
+    msg.includes('404') ||
+    msg.includes('not found') ||
+    msg.includes('model not found') ||
+    msg.includes('is not found') ||
+    msg.includes('does not exist')
+  )
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -281,12 +325,22 @@ export async function onRequestPost(context: any) {
 
       } catch (e: any) {
         if (isQuotaError(e)) {
-          // 24-hour cooldown
-          await setCooldown(supabaseUrl, supabaseKey, keyRecord.id, 24 * 60 * 60 * 1000)
+          await setCooldown(supabaseUrl, supabaseKey, keyRecord.id, COOLDOWN_QUOTA_MS)
           console.warn(`[chat] Key "${keyRecord.name}" hit quota — cooled down 24h`)
           continue
         }
-        // Non-quota: try next key
+        if (isInvalidKeyError(e)) {
+          await disableKey(supabaseUrl, supabaseKey, keyRecord.id)
+          console.warn(`[chat] Key "${keyRecord.name}" is invalid (400/403) — disabled`)
+          continue
+        }
+        if (isModelNotFoundError(e)) {
+          // Model name is bad even after internal retry — short cooldown, key is fine
+          await setCooldown(supabaseUrl, supabaseKey, keyRecord.id, COOLDOWN_TRANSIENT_MS)
+          console.warn(`[chat] Key "${keyRecord.name}" model not found — short cooldown`)
+          continue
+        }
+        // Non-quota / non-auth: try next key
         if (i === keys.length - 1) throw e
       }
     }
