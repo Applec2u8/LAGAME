@@ -22,6 +22,79 @@ type AppMode = 'ai' | 'support'
 interface SupportMessage { id: string; session_id: string; role: 'user' | 'admin'; content: string; created_at: string; attachment_url?: string; attachment_type?: string }
 
 const SUPPORT_TOKEN_KEY = 'lap_support_token'
+const MAX_IMAGE_SIZE = 15 * 1024 * 1024 // 15MB max limit (allows > 10MB up to 15MB)
+const MAX_ATTACHMENTS = 6
+
+async function compressImageIfNeeded(
+  file: File,
+  maxDim = 2048,
+  quality = 0.85
+): Promise<{ dataUrl: string; base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = reject
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string
+      if (!dataUrl) {
+        reject(new Error('Failed to read file'))
+        return
+      }
+
+      // If SVG or GIF, preserve directly without re-encoding
+      if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        const base64 = dataUrl.split(',')[1] || ''
+        resolve({ dataUrl, base64, mimeType: file.type })
+        return
+      }
+
+      const img = new Image()
+      img.onerror = () => {
+        const base64 = dataUrl.split(',')[1] || ''
+        resolve({ dataUrl, base64, mimeType: file.type })
+      }
+      img.onload = () => {
+        let { width, height } = img
+
+        // If dimensions or file size are large (e.g. > 1.5MB or > 2048px), downscale gracefully for AI payload limits
+        if (width > maxDim || height > maxDim || file.size > 1.5 * 1024 * 1024) {
+          if (width > height) {
+            if (width > maxDim) {
+              height = Math.round((height * maxDim) / width)
+              width = maxDim
+            }
+          } else {
+            if (height > maxDim) {
+              width = Math.round((width * maxDim) / height)
+              height = maxDim
+            }
+          }
+
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            const base64 = dataUrl.split(',')[1] || ''
+            resolve({ dataUrl, base64, mimeType: file.type })
+            return
+          }
+
+          ctx.drawImage(img, 0, 0, width, height)
+          const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+          const compressedDataUrl = canvas.toDataURL(outputType, quality)
+          const base64 = compressedDataUrl.split(',')[1] || ''
+          resolve({ dataUrl: compressedDataUrl, base64, mimeType: outputType })
+        } else {
+          const base64 = dataUrl.split(',')[1] || ''
+          resolve({ dataUrl, base64, mimeType: file.type })
+        }
+      }
+      img.src = dataUrl
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 
 // ── Layout ────────────────────────────────────────────────────────
 const Wrap = styled.div`
@@ -445,6 +518,7 @@ export default function ChatBot() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const aiTextRef = useRef<HTMLTextAreaElement>(null)
+  const speechTranscriptRef = useRef<string>('')
   const supportTextRef = useRef<HTMLTextAreaElement>(null)
   const realtimeRef = useRef<any>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -465,7 +539,7 @@ export default function ChatBot() {
 
   // ── Window Resizing ──
   const [winSize, setWinSize] = useState({ w: 400, h: 580 })
-  const isResizing = useRef<'top'|'left'|'tl'|null>(null)
+  const isResizing = useRef<'top' | 'left' | 'tl' | null>(null)
   const startPos = useRef({ x: 0, y: 0, w: 0, h: 0 })
 
   useEffect(() => {
@@ -483,7 +557,7 @@ export default function ChatBot() {
       }
       setWinSize({ w: newW, h: newH })
     }
-    const handleUp = () => { 
+    const handleUp = () => {
       isResizing.current = null
       document.body.style.userSelect = ''
     }
@@ -495,7 +569,7 @@ export default function ChatBot() {
     }
   }, [])
 
-  const startResize = (type: 'top'|'left'|'tl') => (e: React.MouseEvent) => {
+  const startResize = (type: 'top' | 'left' | 'tl') => (e: React.MouseEvent) => {
     e.preventDefault()
     isResizing.current = type
     startPos.current = { x: e.clientX, y: e.clientY, w: winSize.w, h: winSize.h }
@@ -712,10 +786,10 @@ export default function ChatBot() {
     if (!e.target.files) return
     const filesArray = Array.from(e.target.files) // capture before clearing
     if (fileInputRef.current) fileInputRef.current.value = ''
-    if (supportAttachments.length >= 6) { alert('Maximum 6 attachments per message.'); return }
+    if (supportAttachments.length >= MAX_ATTACHMENTS) { alert(`Maximum ${MAX_ATTACHMENTS} attachments per message.`); return }
 
-    filesArray.slice(0, 6 - supportAttachments.length).forEach(file => {
-      if (file.size > 5 * 1024 * 1024) { alert(t('chat.file_too_large')); return }
+    filesArray.slice(0, MAX_ATTACHMENTS - supportAttachments.length).forEach(file => {
+      if (file.size > MAX_IMAGE_SIZE) { alert('File size must be less than 15MB (ไฟล์ต้องมีขนาดไม่เกิน 15MB)'); return }
       const url = URL.createObjectURL(file)
       setSupportAttachments(prev => [...prev, {
         id: Math.random().toString(36).slice(2, 11),
@@ -730,12 +804,16 @@ export default function ChatBot() {
   const handleSupportPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items
     if (!items) return
-    if (supportAttachments.length >= 6) return
+    if (supportAttachments.length >= MAX_ATTACHMENTS) return
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image/') !== -1) {
         e.preventDefault()
         const file = items[i].getAsFile()
         if (file) {
+          if (file.size > MAX_IMAGE_SIZE) {
+            alert('File size must be less than 15MB (ไฟล์ต้องมีขนาดไม่เกิน 15MB)')
+            return
+          }
           const url = URL.createObjectURL(file)
           setSupportAttachments(prev => [...prev, {
             id: Math.random().toString(36).slice(2, 11),
@@ -877,47 +955,54 @@ export default function ChatBot() {
     const filesArray = Array.from(e.target.files)
     if (aiFileInputRef.current) aiFileInputRef.current.value = ''
 
-    if (aiAttachments.length >= 4) { alert('Maximum 4 attachments allowed per message.'); return }
+    if (aiAttachments.length >= MAX_ATTACHMENTS) { alert(`Maximum ${MAX_ATTACHMENTS} attachments allowed per message.`); return }
 
-    filesArray.slice(0, 4 - aiAttachments.length).forEach(file => {
-      if (file.size > 4 * 1024 * 1024) { alert('Image size must be less than 4MB'); return }
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string
-        setAiAttachments(prev => [...prev, {
-          id: Math.random().toString(36).slice(2, 11),
-          type: 'image',
-          url: dataUrl,
-          base64: dataUrl.split(',')[1],
-          mimeType: file.type
-        }])
-      }
-      reader.readAsDataURL(file)
+    filesArray.slice(0, MAX_ATTACHMENTS - aiAttachments.length).forEach(file => {
+      if (file.size > MAX_IMAGE_SIZE) { alert('Image size must be less than 15MB (ขนาดรูปภาพต้องไม่เกิน 15MB)'); return }
+      compressImageIfNeeded(file).then(({ dataUrl, base64, mimeType }) => {
+        setAiAttachments(prev => {
+          if (prev.length >= MAX_ATTACHMENTS) return prev
+          return [...prev, {
+            id: Math.random().toString(36).slice(2, 11),
+            type: 'image',
+            url: dataUrl,
+            base64,
+            mimeType
+          }]
+        })
+      }).catch(err => {
+        console.error('Image compression error:', err)
+        alert('Failed to process image.')
+      })
     })
   }
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items
     if (!items) return
-    if (aiAttachments.length >= 4) return // Skip if limit reached
+    if (aiAttachments.length >= MAX_ATTACHMENTS) return // Skip if limit reached
 
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image/') !== -1) {
         e.preventDefault()
         const file = items[i].getAsFile()
         if (file) {
-          const reader = new FileReader()
-          reader.onload = (event) => {
-            const dataUrl = event.target?.result as string
-            setAiAttachments(prev => [...prev, {
-              id: Math.random().toString(36).slice(2, 11),
-              type: 'image',
-              url: dataUrl,
-              base64: dataUrl.split(',')[1],
-              mimeType: file.type
-            }])
+          if (file.size > MAX_IMAGE_SIZE) {
+            alert('Image size must be less than 15MB (ขนาดรูปภาพต้องไม่เกิน 15MB)')
+            return
           }
-          reader.readAsDataURL(file)
+          compressImageIfNeeded(file).then(({ dataUrl, base64, mimeType }) => {
+            setAiAttachments(prev => {
+              if (prev.length >= MAX_ATTACHMENTS) return prev
+              return [...prev, {
+                id: Math.random().toString(36).slice(2, 11),
+                type: 'image',
+                url: dataUrl,
+                base64,
+                mimeType
+              }]
+            })
+          }).catch(err => console.error('Image paste error:', err))
         }
         break // only paste one image per paste action to avoid duplicates from multi-format clipboards
       }
@@ -933,19 +1018,55 @@ export default function ChatBot() {
 
     if (isRecording) {
       if (recognitionRef.current) {
-        recognitionRef.current.stop()
+        try { recognitionRef.current.stop() } catch {}
       }
       setIsRecording(false)
-      if (timerRef.current) clearInterval(timerRef.current)
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+      // Programmatically restore focus and place cursor at end on mobile / desktop
+      setTimeout(() => {
+        if (aiTextRef.current) {
+          aiTextRef.current.focus()
+          const len = aiTextRef.current.value.length
+          aiTextRef.current.setSelectionRange(len, len)
+        }
+      }, 60)
     } else {
       const recognition = new SpeechRecognition()
       recognition.continuous = true
       recognition.interimResults = true
       recognition.lang = 'th-TH' // Default to Thai
 
-      let finalTranscript = aiInput
-      if (finalTranscript && !finalTranscript.endsWith(' ')) {
-        finalTranscript += ' '
+      let initialTranscript = aiInput
+      if (initialTranscript && !initialTranscript.endsWith(' ')) {
+        initialTranscript += ' '
+      }
+      speechTranscriptRef.current = initialTranscript
+
+      const finishAndFocus = () => {
+        setIsRecording(false)
+        if (timerRef.current) {
+          clearInterval(timerRef.current)
+          timerRef.current = null
+        }
+        if (speechTranscriptRef.current) {
+          const finalVal = speechTranscriptRef.current.trim()
+          setAiInput(finalVal)
+          if (aiTextRef.current) {
+            aiTextRef.current.value = finalVal
+            aiTextRef.current.style.height = 'auto'
+            aiTextRef.current.style.height = Math.min(aiTextRef.current.scrollHeight, 200) + 'px'
+          }
+        }
+        setTimeout(() => {
+          if (aiTextRef.current) {
+            aiTextRef.current.focus()
+            const len = aiTextRef.current.value.length
+            aiTextRef.current.setSelectionRange(len, len)
+          }
+        }, 60)
       }
 
       recognition.onresult = (e: any) => {
@@ -958,11 +1079,19 @@ export default function ChatBot() {
             interimTranscript += e.results[i][0].transcript
           }
         }
-        finalTranscript += currentFinal
-        setAiInput(finalTranscript + interimTranscript)
 
-        // Auto-resize the text area
+        if (currentFinal) {
+          speechTranscriptRef.current += currentFinal
+        }
+
+        const fullText = speechTranscriptRef.current + interimTranscript
+
+        // 1. Direct state binding on speech result
+        setAiInput(fullText)
+
+        // 2. Direct DOM value binding for mobile WebKit & Blink engines to immediately reflect speech
         if (aiTextRef.current) {
+          aiTextRef.current.value = fullText
           aiTextRef.current.style.height = 'auto'
           aiTextRef.current.style.height = Math.min(aiTextRef.current.scrollHeight, 200) + 'px'
         }
@@ -970,14 +1099,12 @@ export default function ChatBot() {
 
       recognition.onerror = (e: any) => {
         console.error('Speech recognition error', e.error)
-        setIsRecording(false)
-        if (timerRef.current) clearInterval(timerRef.current)
+        finishAndFocus()
         if (e.error === 'not-allowed') alert('Microphone access denied.')
       }
 
       recognition.onend = () => {
-        setIsRecording(false)
-        if (timerRef.current) clearInterval(timerRef.current)
+        finishAndFocus()
       }
 
       recognitionRef.current = recognition
@@ -1322,11 +1449,11 @@ export default function ChatBot() {
                 {/* New mockup-style input box */}
                 <InputBox>
                   {isRecording && (
-                    <VoiceIndicator>
-                      <RecordingDot /> Recording... {formatTime(recordingTime)}
+                    <VoiceIndicator style={{ margin: '8px 12px 6px', padding: '10px 14px' }}>
+                      <RecordingDot /> {t('chat.recording') || 'กำลังบันทึกเสียง...'} {formatTime(recordingTime)}
                     </VoiceIndicator>
                   )}
-                  {!isRecording && features.enable_text ? (
+                  {features.enable_text && (
                     <div style={{ position: 'relative' }}>
                       {mentionQuery !== null && filteredGames.length > 0 && (
                         <MentionMenu>
@@ -1337,7 +1464,7 @@ export default function ChatBot() {
                       )}
                       <TextArea
                         ref={aiTextRef}
-                        placeholder={t('chat.input_placeholder_ai')}
+                        placeholder={isRecording ? 'กำลังฟังเสียงของคุณ...' : t('chat.input_placeholder_ai')}
                         value={aiInput}
                         onChange={handleAiInputChange}
                         onKeyDown={handleAiInputKeyDown}
@@ -1346,7 +1473,7 @@ export default function ChatBot() {
                         disabled={aiLoading}
                       />
                     </div>
-                  ) : null}
+                  )}
 
                   <InputToolbar>
                     <InputToolbarLeft>
@@ -1357,20 +1484,21 @@ export default function ChatBot() {
                       {features.enable_image && (
                         <>
                           <input type="file" accept="image/*" multiple ref={aiFileInputRef} style={{ display: 'none' }} onChange={handleAiImageSelect} />
-                          <ToolbarIconBtn onClick={() => aiFileInputRef.current?.click()} disabled={aiLoading || isRecording || aiAttachments.length >= 4} title="Attach Image">
+                          <ToolbarIconBtn type="button" onClick={() => aiFileInputRef.current?.click()} disabled={aiLoading || isRecording || aiAttachments.length >= MAX_ATTACHMENTS} title="Attach Image">
                             <ImageIcon size={15} />
                           </ToolbarIconBtn>
                         </>
                       )}
-                      <ToolbarIconBtn title="More options">
+                      <ToolbarIconBtn type="button" title="More options">
                         <span style={{ fontSize: 14, letterSpacing: 1 }}>···</span>
                       </ToolbarIconBtn>
                     </InputToolbarLeft>
                     <InputToolbarRight>
                       {features.enable_voice && !isRecording && (
                         <ToolbarIconBtn
+                          type="button"
                           onClick={toggleRecording}
-                          disabled={aiLoading || (!isRecording && aiAttachments.length >= 4)}
+                          disabled={aiLoading || aiAttachments.length >= MAX_ATTACHMENTS}
                           title="Record Voice"
                         >
                           <Mic size={15} />
@@ -1378,6 +1506,7 @@ export default function ChatBot() {
                       )}
                       {(features.enable_text || aiAttachments.length > 0) && !isRecording && (
                         <SendBtn
+                          type="button"
                           onClick={() => aiLoading ? handleStopAi() : sendAiMessage()}
                           disabled={(!aiInput.trim() && aiAttachments.length === 0 && !aiLoading)}
                           $loading={false}
@@ -1386,7 +1515,12 @@ export default function ChatBot() {
                         </SendBtn>
                       )}
                       {isRecording && (
-                        <SendBtn onClick={toggleRecording} $isRecord title="Stop Recording">
+                        <SendBtn
+                          type="button"
+                          onClick={toggleRecording}
+                          $isRecord
+                          title="Stop Recording"
+                        >
                           <Square size={14} fill="#fff" />
                         </SendBtn>
                       )}
@@ -1513,90 +1647,92 @@ export default function ChatBot() {
                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <strong style={{ opacity: 0.8 }}>ตอบกลับ:</strong> {supportReplyingTo}
                     </div>
-                    <button onClick={() => setSupportReplyingTo(null)} style={{ background: 'none', border: 'none', color: '#c4b5fd', cursor: 'pointer', padding: 4 }}><X size={14}/></button>
+                    <button onClick={() => setSupportReplyingTo(null)} style={{ background: 'none', border: 'none', color: '#c4b5fd', cursor: 'pointer', padding: 4 }}><X size={14} /></button>
                   </div>
                 )}
                 <div style={{ padding: '12px 16px', width: '100%', display: 'flex', flexDirection: 'column' }}>
                   {supportAttachments.length > 0 && (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingBottom: 8 }}>
-                    {supportAttachments.map(att => (
-                      att.type === 'image' ? (
-                        <PreviewWrap key={att.id} style={{ flexShrink: 0 }}>
-                          <PreviewImg src={att.url} />
-                          <RemovePreviewBtn onClick={() => removeSupportAttachment(att.id)}><X size={12} /></RemovePreviewBtn>
-                        </PreviewWrap>
-                      ) : (
-                        <div key={att.id} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.2)', padding: '4px 10px', borderRadius: 12, minWidth: 0, position: 'relative', maxWidth: 200 }}>
-                          <audio controls src={att.url} style={{ height: 30, flex: 1, minWidth: 0 }} />
-                          <RemovePreviewBtn style={{ top: -6, right: -6 }} onClick={() => removeSupportAttachment(att.id)}><Trash2 size={12} /></RemovePreviewBtn>
-                        </div>
-                      )
-                    ))}
-                  </div>
-                )}
-
-                <input type="file" accept="image/*" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleSupportFileUpload} />
-
-                <InputBox>
-                  {isSupportRecording && (
-                    <VoiceIndicator>
-                      <RecordingDot /> Recording... {formatTime(supportRecordingTime)}
-                    </VoiceIndicator>
-                  )}
-                  {!isSupportRecording && (
-                    <div style={{ position: 'relative' }}>
-                      {supportMentionQuery !== null && filteredGamesSupport.length > 0 && (
-                        <MentionMenu>
-                          {filteredGamesSupport.map((g, i) => (
-                            <MentionItem key={g} $active={i === supportMentionIndex} onClick={() => insertSupportMention(g)}>{g}</MentionItem>
-                          ))}
-                        </MentionMenu>
-                      )}
-                      <TextArea
-                        ref={supportTextRef}
-                        placeholder={supportPhase === 'naming' ? t('chat.input_placeholder_support_naming') : t('chat.input_placeholder_ai')}
-                        value={supportInput}
-                        onChange={handleSupportInputChange}
-                        onKeyDown={handleSupportKeyDown}
-                        onPaste={handleSupportPaste}
-                        rows={1}
-                        disabled={supportSending}
-                      />
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingBottom: 8 }}>
+                      {supportAttachments.map(att => (
+                        att.type === 'image' ? (
+                          <PreviewWrap key={att.id} style={{ flexShrink: 0 }}>
+                            <PreviewImg src={att.url} />
+                            <RemovePreviewBtn onClick={() => removeSupportAttachment(att.id)}><X size={12} /></RemovePreviewBtn>
+                          </PreviewWrap>
+                        ) : (
+                          <div key={att.id} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.2)', padding: '4px 10px', borderRadius: 12, minWidth: 0, position: 'relative', maxWidth: 200 }}>
+                            <audio controls src={att.url} style={{ height: 30, flex: 1, minWidth: 0 }} />
+                            <RemovePreviewBtn style={{ top: -6, right: -6 }} onClick={() => removeSupportAttachment(att.id)}><Trash2 size={12} /></RemovePreviewBtn>
+                          </div>
+                        )
+                      ))}
                     </div>
                   )}
-                  <InputToolbar>
-                    <InputToolbarLeft>
-                      <ToolbarIconBtn
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={supportSending || isSupportRecording || supportAttachments.length >= 6}
-                        title="Attach Image"
-                      >
-                        <ImageIcon size={15} />
-                      </ToolbarIconBtn>
-                      {features.enable_voice && !isSupportRecording && (
+
+                  <input type="file" accept="image/*" multiple ref={fileInputRef} style={{ display: 'none' }} onChange={handleSupportFileUpload} />
+
+                  <InputBox>
+                    {isSupportRecording && (
+                      <VoiceIndicator>
+                        <RecordingDot /> Recording... {formatTime(supportRecordingTime)}
+                      </VoiceIndicator>
+                    )}
+                    {!isSupportRecording && (
+                      <div style={{ position: 'relative' }}>
+                        {supportMentionQuery !== null && filteredGamesSupport.length > 0 && (
+                          <MentionMenu>
+                            {filteredGamesSupport.map((g, i) => (
+                              <MentionItem key={g} $active={i === supportMentionIndex} onClick={() => insertSupportMention(g)}>{g}</MentionItem>
+                            ))}
+                          </MentionMenu>
+                        )}
+                        <TextArea
+                          ref={supportTextRef}
+                          placeholder={supportPhase === 'naming' ? t('chat.input_placeholder_support_naming') : t('chat.input_placeholder_ai')}
+                          value={supportInput}
+                          onChange={handleSupportInputChange}
+                          onKeyDown={handleSupportKeyDown}
+                          onPaste={handleSupportPaste}
+                          rows={1}
+                          disabled={supportSending}
+                        />
+                      </div>
+                    )}
+                    <InputToolbar>
+                      <InputToolbarLeft>
                         <ToolbarIconBtn
-                          onClick={toggleSupportRecording}
-                          disabled={supportSending || (!isSupportRecording && supportAttachments.length >= 6)}
-                          title="Voice Message"
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={supportSending || isSupportRecording || supportAttachments.length >= MAX_ATTACHMENTS}
+                          title="Attach Image"
                         >
-                          <Mic size={15} />
+                          <ImageIcon size={15} />
                         </ToolbarIconBtn>
-                      )}
-                    </InputToolbarLeft>
-                    <InputToolbarRight>
-                      <SendBtn
-                        onClick={isSupportRecording ? toggleSupportRecording : sendSupportMessage}
-                        $loading={supportSending}
-                        $isRecord={isSupportRecording}
-                        disabled={supportSending || (!supportInput.trim() && supportAttachments.length === 0 && !isSupportRecording)}
-                        title={isSupportRecording ? "Stop Recording" : "Send"}
-                      >
-                        {supportSending ? <Spinner /> : isSupportRecording ? <Square size={14} fill="#fff" /> : <Send size={14} />}
-                      </SendBtn>
-                    </InputToolbarRight>
-                  </InputToolbar>
-                </InputBox>
-                <InputFooterText>Labot อาจเกิดข้อผิดพลาด กรุณาใช้ด้วยวิจารณญาณ</InputFooterText>
+                        {features.enable_voice && !isSupportRecording && (
+                          <ToolbarIconBtn
+                            type="button"
+                            onClick={toggleSupportRecording}
+                            disabled={supportSending || (!isSupportRecording && supportAttachments.length >= MAX_ATTACHMENTS)}
+                            title="Voice Message"
+                          >
+                            <Mic size={15} />
+                          </ToolbarIconBtn>
+                        )}
+                      </InputToolbarLeft>
+                      <InputToolbarRight>
+                        <SendBtn
+                          onClick={isSupportRecording ? toggleSupportRecording : sendSupportMessage}
+                          $loading={supportSending}
+                          $isRecord={isSupportRecording}
+                          disabled={supportSending || (!supportInput.trim() && supportAttachments.length === 0 && !isSupportRecording)}
+                          title={isSupportRecording ? "Stop Recording" : "Send"}
+                        >
+                          {supportSending ? <Spinner /> : isSupportRecording ? <Square size={14} fill="#fff" /> : <Send size={14} />}
+                        </SendBtn>
+                      </InputToolbarRight>
+                    </InputToolbar>
+                  </InputBox>
+                  <InputFooterText>Labot อาจเกิดข้อผิดพลาด กรุณาใช้ด้วยวิจารณญาณ</InputFooterText>
                 </div>
               </InputArea>
             </>
