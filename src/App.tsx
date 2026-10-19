@@ -18,6 +18,7 @@ import AdminTopRanking from './pages/Admin/TopRanking/AdminTopRanking'
 import AdminSupport from './pages/Admin/Support/AdminSupport'
 import AdminComments from './pages/Admin/Comments/AdminComments'
 import ChatbotSettings from './pages/Admin/Chatbot/ChatbotSettings'
+import AdminBoostMetrics from './pages/Admin/BoostMetrics/AdminBoostMetrics'
 import CommentsPage from './pages/Comments/CommentsPage'
 import ComingSoonPage from './pages/ComingSoon/ComingSoonPage'
 import { AdminAuthProvider } from './context/AdminAuthContext'
@@ -83,9 +84,15 @@ function App() {
                     <Route path="api-keys" element={<ManageApiKeys />} />
                     <Route path="chatbot-settings" element={<ChatbotSettings />} />
                     <Route path="top-ranking" element={<AdminTopRanking />} />
+                    <Route path="boost-metrics" element={<AdminBoostMetrics />} />
+                    <Route path="game-engagement" element={<Navigate to="/ap-admin/boost-metrics" replace />} />
                     <Route path="comments" element={<AdminComments />} />
                     <Route path="" element={<Navigate to="dashboard" replace />} />
                   </Route>
+
+                  {/* Fallback admin redirects */}
+                  <Route path="/admin/boost-metrics" element={<Navigate to="/ap-admin/boost-metrics" replace />} />
+                  <Route path="/admin/game-engagement" element={<Navigate to="/ap-admin/boost-metrics" replace />} />
 
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

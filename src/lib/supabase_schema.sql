@@ -29,9 +29,16 @@ CREATE TABLE IF NOT EXISTS games (
   category_ids UUID[] DEFAULT '{}',
   is_featured BOOLEAN DEFAULT FALSE,
   view_count INTEGER DEFAULT 0,
+  views_count INTEGER DEFAULT 0,
+  likes_count INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Engagement metrics columns migration
+ALTER TABLE games ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS likes_count INTEGER DEFAULT 0;
+UPDATE games SET views_count = view_count WHERE (views_count IS NULL OR views_count = 0) AND view_count > 0;
 
 -- Download links table
 CREATE TABLE IF NOT EXISTS download_links (

@@ -41,6 +41,9 @@ export type Game = {
   is_featured: boolean
   is_coming_soon?: boolean
   view_count: number
+  views_count?: number
+  likes_count?: number
+  like_count?: number
   file_size: string | null
   video_url: string | null
   created_at: string

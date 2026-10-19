@@ -1,9 +1,11 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import styled from 'styled-components'
-import { Download, Eye, Monitor, Apple } from 'lucide-react'
+import { LinkIcon, Eye, ThumbsUp, Monitor, Apple } from 'lucide-react'
 import type { Game } from '../../lib/supabase'
 import { useCategoryTranslator } from '../../lib/i18n/CategoryTranslator'
 import { SCROLL_KEYS } from '../../hooks/useScrollRestore'
+import { getEffectiveViews, getEffectiveLikes } from '../../lib/engagementService'
 
 const Card = styled(Link)`
   display: block;
@@ -135,6 +137,7 @@ const DownloadCount = styled.div`
   gap: 4px;
   font-size: 12px;
   color: rgba(148,163,184,0.6);
+  color: #a855f7;
 `
 
 const ViewCountBadge = styled.div`
@@ -142,7 +145,15 @@ const ViewCountBadge = styled.div`
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: rgba(148,163,184,0.55);
+  color: #38bdf8;
+`
+
+const LikeCountBadge = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #ef4444;
 `
 
 const PlaceholderCover = styled.div`
@@ -173,15 +184,30 @@ type Props = {
 
 export default function GameCard({ game }: Props) {
   const { translateCategoryName } = useCategoryTranslator()
+  const [views, setViews] = useState(() => getEffectiveViews(game))
+  const [likes, setLikes] = useState(() => getEffectiveLikes(game))
+
+  useEffect(() => {
+    setViews(getEffectiveViews(game))
+    setLikes(getEffectiveLikes(game))
+  }, [game])
+
+  useEffect(() => {
+    const onMetricsUpdated = (e: any) => {
+      if (e.detail?.gameId === game.id) {
+        if (typeof e.detail.views === 'number') setViews(e.detail.views)
+        if (typeof e.detail.likes === 'number') setLikes(e.detail.likes)
+      }
+    }
+    window.addEventListener('la_game_metrics_updated', onMetricsUpdated)
+    return () => window.removeEventListener('la_game_metrics_updated', onMetricsUpdated)
+  }, [game.id])
 
   const saveScrollOnClick = () => {
     const key = PATHNAME_TO_SCROLL_KEY[window.location.pathname]
     if (key) {
       const y = window.scrollY
-      // Save to sessionStorage (survives page refresh)
       sessionStorage.setItem(key, String(y))
-      // Save to history.state (survives Back navigation — most reliable method)
-      // Preserves React Router's { key, usr } fields by spreading existing state.
       try {
         const prev = window.history.state ?? {}
         window.history.replaceState({ ...prev, [key]: y }, '')
@@ -195,10 +221,10 @@ export default function GameCard({ game }: Props) {
         {game.cover_image ? (
           <>
             {game.cover_image.includes('#landscape') && <CoverBlur src={game.cover_image.split('#')[0]} alt="" />}
-            <Cover 
-              src={game.cover_image.split('#')[0]} 
-              alt={game.title} 
-              loading="lazy" 
+            <Cover
+              src={game.cover_image.split('#')[0]}
+              alt={game.title}
+              loading="lazy"
               $orient={game.cover_image.includes('#landscape') ? 'landscape' : 'portrait'}
             />
           </>
@@ -222,26 +248,32 @@ export default function GameCard({ game }: Props) {
             <CategoryBadge>{translateCategoryName(game.category?.name || 'Game')}</CategoryBadge>
             {game.system_requirements?.platforms && game.system_requirements.platforms.length > 0 && (
               <div style={{ display: 'flex', gap: 8, color: 'rgba(148,163,184,0.7)', fontSize: 11, fontWeight: 600 }}>
-                {game.system_requirements.platforms.includes('windows') && <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Monitor size={12} /> Win</div>}
-                {game.system_requirements.platforms.includes('macos') && <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Apple size={12} /> Mac</div>}
+                {game.system_requirements.platforms.includes('windows') && <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Monitor size={12} /></div>}
+                {game.system_requirements.platforms.includes('macos') && <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Apple size={12} /></div>}
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ViewCountBadge title="Views">
               <Eye size={11} />
-              {(game.view_count ?? 0) >= 1000
-                ? `${((game.view_count ?? 0) / 1000).toFixed(1)}k`
-                : (game.view_count ?? 0)}
+              {views >= 1000
+                ? `${(views / 1000).toFixed(1)}k`
+                : views}
             </ViewCountBadge>
+            <LikeCountBadge title="Likes">
+              <ThumbsUp size={10} />
+              {likes >= 1000
+                ? `${(likes / 1000).toFixed(1)}k`
+                : likes}
+            </LikeCountBadge>
             {(game as any).is_coming_soon ? (
               <DownloadCount style={{ color: '#fbbf24', fontWeight: 600 }}>
                 🚀 Coming Soon
               </DownloadCount>
             ) : (
               <DownloadCount>
-                <Download size={11} />
-                {game.download_links?.length ?? 0} links
+                <LinkIcon size={11} />
+                {game.download_links?.length ?? 0}
               </DownloadCount>
             )}
           </div>

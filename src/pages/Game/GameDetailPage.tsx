@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages, Share2 } from 'lucide-react'
+import { ArrowLeft, Download, Monitor, Cpu, ExternalLink, Loader2, Play, AlignLeft, Apple, ChevronLeft, ChevronRight, Languages, Share2, ThumbsUp, Eye } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import type { Game, DownloadLink, Category } from '../../lib/supabase'
 import { useCategoryTranslator } from '../../lib/i18n/CategoryTranslator'
 import { useAdSettings } from '../../context/AdSettingsContext'
 import { trackGameView } from '../../lib/analytics'
+import { getEffectiveViews, getEffectiveLikes, isGameLikedByUser, toggleUserGameLike } from '../../lib/engagementService'
 import CommentSection from '../../components/CommentSection/CommentSection'
 import PCSpecChecker from '../../components/PCSpecChecker/PCSpecChecker'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
@@ -55,6 +56,9 @@ export default function GameDetailPage() {
   const [copied, setCopied] = useState(false)
   const [showOriginalDesc, setShowOriginalDesc] = useState(false)
   const [showOriginalReqs, setShowOriginalReqs] = useState(false)
+  const [views, setViews] = useState(0)
+  const [likes, setLikes] = useState(0)
+  const [isLiked, setIsLiked] = useState(false)
 
   // Mark all possible listing pages so that if the user goes back to any of them, it restores their specific scroll.
   useEffect(() => {
@@ -92,12 +96,39 @@ export default function GameDetailPage() {
         .order('sort_order')
       setLinks((dl as any) || [])
 
+      const currentV = getEffectiveViews(data as any)
+      const currentL = getEffectiveLikes(data as any)
+      setViews(currentV + 1)
+      setLikes(currentL)
+      setIsLiked(isGameLikedByUser((data as any).id))
+
       // Track game view by platform (also updates legacy view_count)
       trackGameView((data as any).id, (data as any).view_count || 0)
       setLoading(false)
     }
     fetch()
   }, [slug])
+
+  // Listen for live boost metrics update from admin or other sessions
+  useEffect(() => {
+    const gameId = game?.id
+    if (!gameId) return
+    const onMetricsUpdated = (e: any) => {
+      if (e.detail?.gameId === gameId) {
+        if (typeof e.detail.views === 'number') setViews(e.detail.views)
+        if (typeof e.detail.likes === 'number') setLikes(e.detail.likes)
+      }
+    }
+    window.addEventListener('la_game_metrics_updated', onMetricsUpdated)
+    return () => window.removeEventListener('la_game_metrics_updated', onMetricsUpdated)
+  }, [game?.id])
+
+  const handleToggleLike = async () => {
+    if (!game) return
+    const { liked, newLikes } = await toggleUserGameLike(game.id, likes)
+    setIsLiked(liked)
+    setLikes(newLikes)
+  }
 
 
 
@@ -195,8 +226,8 @@ export default function GameDetailPage() {
               </div>
             )}
             <Title>{game.title}</Title>
-            {/* Meta row: file size + share buttons */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 18, marginTop: 4 }}>
+            {/* Meta row: file size + views + likes + share buttons */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 18, marginTop: 4 }}>
               {/* File size badge */}
               {(game as any).file_size && (
                 <div style={{
@@ -208,10 +239,51 @@ export default function GameDetailPage() {
                   💾 <strong>{t('game.storage')}:</strong>&nbsp;{(game as any).file_size}
                 </div>
               )}
+
+              {/* View Count Badge */}
+              <div
+                title="Total Views"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(148,163,184,0.08)', border: '1px solid rgba(148,163,184,0.18)',
+                  borderRadius: 8, padding: '6px 12px', fontSize: 13, color: '#94a3b8',
+                  flexShrink: 0,
+                }}
+              >
+                <Eye size={14} color="#38bdf8" />
+                <span><strong>{views.toLocaleString()}</strong> {t('game.views') || 'Views'}</span>
+              </div>
+
+              {/* Like Button & Count Badge */}
+              <button
+                type="button"
+                onClick={handleToggleLike}
+                title={isLiked ? 'Unlike' : 'Like this game'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: isLiked ? 'rgba(56,189,248,0.18)' : 'rgba(148,163,184,0.08)',
+                  border: isLiked ? '1px solid rgba(56,189,248,0.4)' : '1px solid rgba(148,163,184,0.18)',
+                  borderRadius: 8, padding: '6px 12px', fontSize: 13,
+                  color: isLiked ? '#38bdf8' : '#e2e8f0',
+                  cursor: 'pointer', transition: 'all 0.2s ease',
+                  flexShrink: 0,
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = 'translateY(-1px)'
+                  e.currentTarget.style.borderColor = '#38bdf8'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = 'translateY(0)'
+                  e.currentTarget.style.borderColor = isLiked ? 'rgba(56,189,248,0.4)' : 'rgba(148,163,184,0.18)'
+                }}
+              >
+                <ThumbsUp size={14} fill={isLiked ? '#38bdf8' : 'none'} color="#38bdf8" />
+                <span><strong>{likes.toLocaleString()}</strong> {likes === 1 ? 'Like' : 'Likes'}</span>
+              </button>
+
               {/* Divider */}
-              {(game as any).file_size && (
-                <div style={{ width: 1, height: 22, background: 'rgba(148,163,184,0.15)', flexShrink: 0 }} />
-              )}
+              <div style={{ width: 1, height: 22, background: 'rgba(148,163,184,0.15)', flexShrink: 0 }} />
+
               {/* Share buttons */}
               {typeof navigator !== 'undefined' && 'share' in navigator && (
                 <ShareBtn $variant="native" onClick={handleShare}>
