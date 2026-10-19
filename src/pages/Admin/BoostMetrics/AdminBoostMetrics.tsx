@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import styled, { keyframes } from 'styled-components'
 import {
   Flame, ThumbsUp, Eye, Search, RefreshCw, CheckCircle2, AlertCircle,
   Sliders, ChevronLeft, ChevronRight, Save, Copy, Check, ExternalLink,
-  X, BarChart3, Filter, Clock, Target, PlayCircle, PauseCircle, Trash2,
-  Calendar, TrendingUp, Info, ListChecks,
-  RotateCcw, Zap, Plus, ArrowUpDown, LayoutGrid, LayoutList, Database, Sparkles
+  X, BarChart3, Clock, Target, PlayCircle, PauseCircle, Trash2,
+  TrendingUp, Info, ListChecks,
+  Zap, Plus, LayoutGrid, LayoutList, Database, Sparkles
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import type { Game, Category } from '../../../lib/supabase'
@@ -14,6 +16,830 @@ import {
   updateGameMetrics,
   batchUpdateGameMetrics,
 } from '../../../lib/engagementService'
+import {
+  AdminPage,
+  TableWrap,
+  SearchWrap, SearchInput, SearchIcon,
+  SecondaryBtn, PrimaryBtn,
+} from '../adminStyles'
+
+/* ─── Keyframe Animations ─────────────────────────────────────────────────── */
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+`
+
+const slideInRight = keyframes`
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+`
+
+const slideUpMobile = keyframes`
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+`
+
+/* ─── Styled Components (Admin Design System) ────────────────────────────── */
+
+const ToastContainer = styled.div`
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 380px;
+  width: calc(100vw - 48px);
+  pointer-events: none;
+`
+
+const ToastItem = styled.div<{ $type: string }>`
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: ${p =>
+    p.$type === 'success' ? 'rgba(6, 78, 59, 0.95)' :
+    p.$type === 'error' ? 'rgba(127, 29, 29, 0.95)' :
+    p.$type === 'warning' ? 'rgba(120, 53, 15, 0.95)' :
+    'rgba(30, 27, 75, 0.95)'};
+  border: 1px solid ${p =>
+    p.$type === 'success' ? 'rgba(52, 211, 153, 0.4)' :
+    p.$type === 'error' ? 'rgba(248, 113, 113, 0.4)' :
+    p.$type === 'warning' ? 'rgba(251, 191, 36, 0.4)' :
+    'rgba(129, 140, 248, 0.4)'};
+  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+  animation: ${slideInRight} 0.25s ease both;
+  color: #fff;
+`
+
+// Header Box
+const HeaderBox = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+  @media (max-width: 640px) {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+`
+
+const HeaderLeft = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  @media (max-width: 640px) {
+    gap: 10px;
+  }
+`
+
+const HeaderIcon = styled.div`
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f97316, #e11d48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 18px rgba(249, 115, 22, 0.4);
+  flex-shrink: 0;
+  @media (max-width: 640px) {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    svg { width: 18px; height: 18px; }
+  }
+`
+
+const HeaderTitleText = styled.h1`
+  font-family: 'Noto Sans Lao', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  color: #fff;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.5px;
+  @media (max-width: 640px) {
+    font-size: 19px;
+    gap: 6px;
+  }
+`
+
+const HeaderSubText = styled.p`
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.65);
+  font-weight: 400;
+  @media (max-width: 640px) {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+`
+
+const HeaderActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  @media (max-width: 640px) {
+    width: 100%;
+    gap: 6px;
+    button {
+      flex: 1;
+      padding: 8px 8px !important;
+      font-size: 11px !important;
+      justify-content: center;
+    }
+  }
+`
+
+// KPI Stats Grid (Compact 2x2 in mobile!)
+const StatsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+`
+
+const StatCard = styled.div<{ $color: string }>`
+  position: relative;
+  background: rgba(20, 20, 38, 0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: all 0.25s ease;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: ${p => p.$color};
+    box-shadow: 0 0 16px ${p => p.$color};
+  }
+  @media (max-width: 640px) {
+    padding: 12px 14px;
+    border-radius: 14px;
+    &::before { height: 2px; }
+  }
+`
+
+const StatHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  @media (max-width: 640px) {
+    margin-bottom: 6px;
+  }
+`
+
+const StatLabel = styled.span`
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(148, 163, 184, 0.7);
+  @media (max-width: 640px) {
+    font-size: 10px;
+    letter-spacing: 0.3px;
+  }
+`
+
+const StatIconBox = styled.div<{ $color: string }>`
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: ${p => p.$color}18;
+  color: ${p => p.$color};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid ${p => p.$color}30;
+  @media (max-width: 640px) {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    svg { width: 14px; height: 14px; }
+  }
+`
+
+const StatNum = styled.div`
+  font-family: 'Noto Sans Lao', sans-serif;
+  font-size: 28px;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  @media (max-width: 640px) {
+    font-size: 19px;
+  }
+`
+
+const StatSub = styled.div`
+  font-size: 12px;
+  color: rgba(148, 163, 184, 0.6);
+  margin-top: 5px;
+  font-weight: 500;
+  @media (max-width: 640px) {
+    font-size: 10px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+`
+
+// Tabs
+const TabBar = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 20px;
+  @media (max-width: 640px) {
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+`
+
+const TabNav = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  @media (max-width: 640px) {
+    width: 100%;
+    gap: 6px;
+  }
+`
+
+const TabBtn = styled.button<{ $active: boolean; $gradient?: string }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 14px;
+  font-family: 'Noto Sans Lao', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: ${p => p.$active
+    ? (p.$gradient || 'linear-gradient(135deg, #7c3aed, #06b6d4)')
+    : 'rgba(255, 255, 255, 0.04)'};
+  border: 1px solid ${p => p.$active ? 'rgba(124, 58, 237, 0.5)' : 'rgba(255, 255, 255, 0.08)'};
+  color: ${p => p.$active ? '#fff' : 'rgba(148, 163, 184, 0.8)'};
+  box-shadow: ${p => p.$active ? '0 4px 18px rgba(124, 58, 237, 0.35)' : 'none'};
+  @media (max-width: 640px) {
+    flex: 1;
+    padding: 8px 8px;
+    font-size: 11px;
+    border-radius: 10px;
+    justify-content: center;
+    gap: 4px;
+  }
+`
+
+const TabBadge = styled.span<{ $active: boolean }>`
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  background: ${p => p.$active ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.1)'};
+  color: #fff;
+`
+
+const ViewToggle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(10, 10, 20, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  @media (max-width: 768px) {
+    display: none;
+  }
+`
+
+const ViewBtn = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  background: ${p => p.$active ? 'rgba(255, 255, 255, 0.12)' : 'transparent'};
+  color: ${p => p.$active ? '#fff' : 'rgba(148, 163, 184, 0.6)'};
+  transition: all 0.15s;
+`
+
+// Filter Bar
+const FilterBar = styled.div`
+  background: rgba(20, 20, 38, 0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  @media (max-width: 640px) {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+`
+
+const FilterGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  @media (max-width: 640px) {
+    width: 100%;
+    select {
+      flex: 1;
+      padding: 7px 10px;
+      font-size: 11px;
+    }
+  }
+`
+
+const StyledSelect = styled.select`
+  padding: 9px 14px;
+  background: rgba(10, 10, 20, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: #e2e8f0;
+  font-size: 13px;
+  font-family: 'Noto Sans Lao', sans-serif;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  &:focus {
+    border-color: rgba(124, 58, 237, 0.6);
+  }
+  option {
+    background: #121226;
+    color: #e2e8f0;
+  }
+`
+
+// Bulk Actions Bar
+const BulkBar = styled.div`
+  background: linear-gradient(135deg, rgba(30, 27, 75, 0.95), rgba(49, 46, 129, 0.95));
+  border: 1px solid rgba(124, 58, 237, 0.4);
+  border-radius: 16px;
+  padding: 12px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  box-shadow: 0 8px 28px rgba(124, 58, 237, 0.25);
+  animation: ${fadeIn} 0.25s ease both;
+  @media (max-width: 640px) {
+    padding: 10px 14px;
+  }
+`
+
+const BulkInfo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+`
+
+const BulkActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+`
+
+// Table Styling
+const TableSection = styled(TableWrap)`
+  margin-bottom: 24px;
+`
+
+const TableHeadRow = styled.div`
+  display: grid;
+  grid-template-columns: 44px 1.4fr 1.1fr 1.1fr 110px;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  background: rgba(124, 58, 237, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(148, 163, 184, 0.6);
+  @media (max-width: 900px) {
+    grid-template-columns: 40px 1.2fr 1fr 1fr;
+  }
+  @media (max-width: 680px) {
+    display: none;
+  }
+`
+
+const TableItemRow = styled.div<{ $selected?: boolean }>`
+  display: grid;
+  grid-template-columns: 44px 1.4fr 1.1fr 1.1fr 110px;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: ${p => p.$selected ? 'rgba(124, 58, 237, 0.08)' : 'transparent'};
+  transition: background 0.15s;
+  &:hover {
+    background: ${p => p.$selected ? 'rgba(124, 58, 237, 0.12)' : 'rgba(255, 255, 255, 0.02)'};
+  }
+  &:last-child {
+    border-bottom: none;
+  }
+  @media (max-width: 900px) {
+    grid-template-columns: 40px 1.2fr 1fr 1fr;
+  }
+  @media (max-width: 680px) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+`
+
+const MetricControl = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+`
+
+const MetricInputRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`
+
+const MetricInput = styled.input<{ $changed?: boolean; $color?: string }>`
+  width: 90px;
+  padding: 6px 10px;
+  background: rgba(10, 10, 20, 0.7);
+  border: 1px solid ${p => p.$changed ? (p.$color || '#06b6d4') : 'rgba(255, 255, 255, 0.12)'};
+  border-radius: 9px;
+  color: ${p => p.$changed ? (p.$color || '#fff') : '#e2e8f0'};
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  font-family: monospace;
+  transition: all 0.2s;
+  box-shadow: ${p => p.$changed ? `0 0 10px ${(p.$color || '#06b6d4')}33` : 'none'};
+  &:focus {
+    border-color: ${p => p.$color || '#06b6d4'};
+    box-shadow: 0 0 0 2px ${p => (p.$color || '#06b6d4') + '33'};
+  }
+  @media (max-width: 680px) {
+    width: 80px;
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+`
+
+const QuickPill = styled.button<{ $color: string }>`
+  padding: 3px 8px;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  background: ${p => p.$color}18;
+  border: 1px solid ${p => p.$color}38;
+  color: ${p => p.$color};
+  transition: all 0.15s;
+  &:hover {
+    background: ${p => p.$color}30;
+    transform: scale(1.05);
+  }
+`
+
+// Game thumbnail
+const GameThumb = styled.img`
+  width: 44px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+`
+
+const GameThumbPlaceholder = styled.div`
+  width: 44px;
+  height: 58px;
+  border-radius: 8px;
+  background: rgba(124, 58, 237, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+`
+
+// Pagination
+const PaginationWrap = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  @media (max-width: 640px) {
+    justify-content: center;
+  }
+`
+
+const PageBtn = styled.button<{ $active?: boolean }>`
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: ${p => p.$active ? 'linear-gradient(135deg, #7c3aed, #06b6d4)' : 'rgba(255, 255, 255, 0.04)'};
+  border: 1px solid ${p => p.$active ? 'rgba(124, 58, 237, 0.5)' : 'rgba(255, 255, 255, 0.07)'};
+  color: ${p => p.$active ? '#fff' : 'rgba(148, 163, 184, 0.7)'};
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+`
+
+// Schedules Grid
+const SchedulesGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 18px;
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+`
+
+const SchedCard = styled.div`
+  background: rgba(20, 20, 38, 0.75);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.25s ease;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  @media (max-width: 640px) {
+    padding: 16px 14px;
+    border-radius: 16px;
+  }
+`
+
+const SchedHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  @media (max-width: 640px) {
+    margin-bottom: 10px;
+  }
+`
+
+const SchedInfoBox = styled.div`
+  background: rgba(10, 10, 20, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  @media (max-width: 640px) {
+    padding: 10px 12px;
+    gap: 5px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+  }
+`
+
+const SchedInfoRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  @media (max-width: 640px) {
+    font-size: 11px;
+  }
+`
+
+const SchedStatsRow = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+  @media (max-width: 640px) {
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+`
+
+const SchedStatTile = styled.div<{ $color?: string }>`
+  background: ${p => p.$color ? p.$color + '12' : 'rgba(255, 255, 255, 0.03)'};
+  border: 1px solid ${p => p.$color ? p.$color + '26' : 'rgba(255, 255, 255, 0.06)'};
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+  @media (max-width: 640px) {
+    padding: 6px 4px;
+    border-radius: 10px;
+    div:first-child { font-size: 9px !important; }
+    div:last-child { font-size: 13px !important; margin-top: 2px !important; }
+  }
+`
+
+const BoostNowBtn = styled.button<{ $running: boolean }>`
+  width: 100%;
+  padding: 12px 20px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: ${p => p.$running ? 'not-allowed' : 'pointer'};
+  color: #fff;
+  border: none;
+  background: ${p => p.$running
+    ? 'rgba(255, 255, 255, 0.1)'
+    : 'linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%)'};
+  box-shadow: ${p => p.$running ? 'none' : '0 4px 18px rgba(124, 58, 237, 0.35)'};
+  transition: all 0.2s;
+  @media (max-width: 640px) {
+    padding: 10px 14px;
+    font-size: 12px;
+    border-radius: 12px;
+  }
+`
+
+// Modal Components (Full screen backdrop with Mobile Bottom Sheet!)
+const ModalBackdrop = styled.div`
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  @media (max-width: 640px) {
+    align-items: flex-end;
+    padding: 0;
+  }
+`
+
+const ModalBox = styled.div<{ $maxWidth?: string }>`
+  background: rgba(18, 18, 34, 0.98);
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  border-radius: 24px;
+  max-width: ${p => p.$maxWidth || '640px'};
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+  animation: ${fadeIn} 0.25s ease both;
+
+  @media (max-width: 640px) {
+    max-width: 100%;
+    border-radius: 24px 24px 0 0;
+    max-height: 86vh;
+    animation: ${slideUpMobile} 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+    border-bottom: none;
+    border-left: none;
+    border-right: none;
+  }
+`
+
+const DragHandle = styled.div`
+  display: none;
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 10px auto 2px;
+  flex-shrink: 0;
+  @media (max-width: 640px) {
+    display: block;
+  }
+`
+
+const ModalHeaderWrap = styled.div`
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  @media (max-width: 640px) {
+    padding: 14px 18px;
+  }
+`
+
+const ModalBodyWrap = styled.div`
+  padding: 22px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  @media (max-width: 640px) {
+    padding: 16px 18px;
+    gap: 14px;
+  }
+`
+
+const ModalFooterWrap = styled.div`
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(10, 10, 20, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  @media (max-width: 640px) {
+    padding: 12px 18px;
+    gap: 8px;
+    button {
+      flex: 1;
+      justify-content: center;
+      padding: 9px 12px !important;
+      font-size: 12px !important;
+    }
+  }
+`
+
+const StyledInput = styled.input`
+  width: 100%;
+  padding: 11px 16px;
+  background: rgba(10, 10, 20, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+  font-family: 'Noto Sans Lao', sans-serif;
+  transition: all 0.2s;
+  &:focus {
+    border-color: rgba(124, 58, 237, 0.7);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+  }
+  &::placeholder {
+    color: rgba(148, 163, 184, 0.4);
+  }
+  @media (max-width: 640px) {
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+`
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -117,7 +943,6 @@ export default function AdminBoostMetrics() {
   const [categories, setCategories] = useState<Category[]>([])
   const [schedules, setSchedules] = useState<BoostSchedule[]>([])
   const [loading, setLoading] = useState(true)
-  const [schedLoading, setSchedLoading] = useState(false)
 
   const [savingId, setSavingId] = useState<string | null>(null)
   const [batchSaving, setBatchSaving] = useState(false)
@@ -136,6 +961,8 @@ export default function AdminBoostMetrics() {
   const [savingSched, setSavingSched] = useState(false)
   const [editSchedId, setEditSchedId] = useState<string | null>(null)
   const [showSqlModal, setShowSqlModal] = useState(false)
+  const [copiedSql, setCopiedSql] = useState(false)
+  const [boostingId, setBoostingId] = useState<string | null>(null)
 
   const [fineGame, setFineGame] = useState<GameWithMetrics | null>(null)
   const [fineMode, setFineMode] = useState<'increment' | 'overwrite'>('increment')
@@ -143,36 +970,31 @@ export default function AdminBoostMetrics() {
   const [fineLikes, setFineLikes] = useState(50)
 
   const [toasts, setToasts] = useState<ToastInfo[]>([])
-  const [copiedSql, setCopiedSql] = useState(false)
   const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const schedulesRef = useRef<BoostSchedule[]>([])
 
-  /* ── Toast ── */
-  const toast = useCallback((type: ToastInfo['type'], title: string, message: string) => {
-    const id = Math.random().toString(36).slice(2, 9)
-    setToasts(p => [...p, { id, type, title, message }])
-    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 4200)
+  /* ── Toast Manager ── */
+  const toast = useCallback((type: ToastInfo['type'], title: string, message?: string) => {
+    const id = Math.random().toString(36).slice(2)
+    setToasts(p => [...p, { id, type, title, message: message || '' }])
+    setTimeout(() => {
+      setToasts(p => p.filter(t => t.id !== id))
+    }, 4500)
   }, [])
 
-  /* ── Fetch ── */
+  /* ── Fetch Data ── */
   const fetchSchedules = useCallback(async () => {
-    setSchedLoading(true)
     try {
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from('boost_schedules')
         .select('*')
         .order('created_at', { ascending: false })
-      if (data) {
+      if (!error && data) {
         setSchedules(data as BoostSchedule[])
-        const map = new Map<string, string>()
-          ; (data as BoostSchedule[]).forEach(s => {
-            if (s.is_active) s.game_ids?.forEach((id: string) => map.set(id, s.id))
-          })
-        setGames(p => p.map(g => ({ ...g, activeScheduleId: map.get(g.id) })))
+        schedulesRef.current = data as BoostSchedule[]
       }
     } catch {
-      /* table might not exist yet */
-    } finally {
-      setSchedLoading(false)
+      /* silent */
     }
   }, [])
 
@@ -180,12 +1002,15 @@ export default function AdminBoostMetrics() {
     setLoading(true)
     try {
       const [gr, cr] = await Promise.all([
-        supabase.from('games').select('*, category:categories(id,name,slug)').order('created_at', { ascending: false }),
+        supabase
+          .from('games')
+          .select('*, category:categories(id, name)')
+          .order('created_at', { ascending: false }),
         supabase.from('categories').select('*').order('name', { ascending: true }),
       ])
       if (cr.data) setCategories(cr.data as Category[])
       if (gr.data) {
-        setGames((gr.data as any[]).map(g => {
+        const mapped = (gr.data as any[]).map(g => {
           const v = getEffectiveViews(g)
           const l = getEffectiveLikes(g)
           return {
@@ -196,7 +1021,8 @@ export default function AdminBoostMetrics() {
             draftLikes: l,
             categoryName: g.category?.name || 'Uncategorized',
           }
-        }))
+        })
+        setGames(mapped)
       }
     } catch (e: any) {
       toast('error', 'Load Error', e?.message)
@@ -206,156 +1032,322 @@ export default function AdminBoostMetrics() {
     await fetchSchedules()
   }, [toast, fetchSchedules])
 
+  /* ── Client-Side Schedule Execution Engine ── */
+  const randInt = (min: number, max: number) =>
+    Math.floor(Math.random() * (Math.max(min, max) - Math.min(min, max) + 1)) + Math.min(min, max)
+
+  const executeSchedule = useCallback(async (sched: BoostSchedule) => {
+    console.log(`[AutoBoost] Executing schedule ${sched.id} (${sched.label || sched.scope})`)
+
+    let targetIds: string[] = []
+    if (sched.scope === 'all') {
+      const { data: allG } = await (supabase as any).from('games').select('id')
+      if (allG) targetIds = allG.map((r: any) => r.id)
+    } else if (sched.scope === 'category' && sched.category_id) {
+      const { data: catG } = await (supabase as any)
+        .from('games')
+        .select('id, category_id, category_ids')
+      if (catG) {
+        targetIds = catG
+          .filter((g: any) => g.category_id === sched.category_id || (g.category_ids && g.category_ids.includes(sched.category_id)))
+          .map((g: any) => g.id)
+      }
+    } else {
+      targetIds = sched.game_ids || []
+    }
+
+    if (targetIds.length === 0) {
+      console.warn('[AutoBoost] No target games found for schedule', sched.id)
+      return { viewsAdded: 0, likesAdded: 0, gamesUpdated: 0 }
+    }
+
+    const { data: currentRows, error: fetchErr } = await (supabase as any)
+      .from('games')
+      .select('id, view_count, views_count, likes_count')
+      .in('id', targetIds)
+
+    if (fetchErr || !currentRows || currentRows.length === 0) {
+      console.error('[AutoBoost] Could not fetch target games rows:', fetchErr?.message)
+      return { viewsAdded: 0, likesAdded: 0, gamesUpdated: 0 }
+    }
+
+    let totalViewsAdded = 0
+    let totalLikesAdded = 0
+    let gamesUpdated = 0
+
+    for (const g of currentRows as any[]) {
+      const curViews = Math.max(0, g.views_count ?? g.view_count ?? 0)
+      const curLikes = Math.max(0, g.likes_count ?? 0)
+
+      let incViews = 0
+      let incLikes = 0
+
+      if (sched.mode === 'target') {
+        const targetV = sched.target_views ?? 0
+        const targetL = sched.target_likes ?? 0
+        if (targetV > curViews) {
+          const rand = randInt(sched.view_min, sched.view_max)
+          incViews = Math.min(rand, targetV - curViews)
+        }
+        if (targetL > curLikes) {
+          const rand = randInt(sched.like_min, sched.like_max)
+          incLikes = Math.min(rand, targetL - curLikes)
+        }
+      } else {
+        incViews = randInt(sched.view_min, sched.view_max)
+        incLikes = randInt(sched.like_min, sched.like_max)
+      }
+
+      if (incViews === 0 && incLikes === 0) continue
+
+      const newViews = curViews + incViews
+      const newLikes = curLikes + incLikes
+
+      const { error: upErr } = await (supabase as any)
+        .from('games')
+        .update({
+          view_count: newViews,
+          views_count: newViews,
+          likes_count: newLikes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', g.id)
+
+      if (!upErr) {
+        totalViewsAdded += incViews
+        totalLikesAdded += incLikes
+        gamesUpdated += 1
+      }
+    }
+
+    const msMap: Record<string, number> = {
+      minute: 60_000,
+      hour: 3_600_000,
+      day: 86_400_000,
+      month: 30 * 86_400_000,
+    }
+    const nextRunMs = Date.now() + (msMap[sched.interval_unit] || 3_600_000) * sched.interval_value
+    const nextRunAt = new Date(nextRunMs).toISOString()
+
+    await (supabase as any)
+      .from('boost_schedules')
+      .update({
+        last_run_at: new Date().toISOString(),
+        next_run_at: nextRunAt,
+        total_runs: sched.total_runs + 1,
+        total_views_added: sched.total_views_added + totalViewsAdded,
+        total_likes_added: sched.total_likes_added + totalLikesAdded,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sched.id)
+
+    await (supabase as any)
+      .from('boost_run_logs')
+      .insert([{ schedule_id: sched.id, games_updated: gamesUpdated, views_added: totalViewsAdded, likes_added: totalLikesAdded }])
+      .then(() => {}).catch(() => {})
+
+    return { viewsAdded: totalViewsAdded, likesAdded: totalLikesAdded, gamesUpdated }
+  }, [])
+
+  const runDueSchedules = useCallback(async () => {
+    const now = Date.now()
+    const due = schedulesRef.current.filter(
+      s => s.is_active && (!s.next_run_at || new Date(s.next_run_at).getTime() <= now)
+    )
+    if (due.length === 0) return
+    console.log(`[AutoBoost] ${due.length} schedule(s) due to run`)
+    for (const s of due) {
+      await executeSchedule(s)
+    }
+    await fetchSchedules()
+    const { data: freshGames } = await (supabase as any).from('games').select('id, view_count, views_count, likes_count')
+    if (freshGames) {
+      setGames(p => p.map(g => {
+        const fr = (freshGames as any[]).find(r => r.id === g.id)
+        if (!fr) return g
+        const v = Math.max(0, fr.views_count ?? fr.view_count ?? 0)
+        const l = Math.max(0, fr.likes_count ?? 0)
+        return { ...g, currentViews: v, draftViews: v, currentLikes: l, draftLikes: l }
+      }))
+    }
+  }, [executeSchedule, fetchSchedules])
+
   useEffect(() => {
     fetchAll()
-    tickerRef.current = setInterval(async () => {
-      try {
-        await (supabase as any).rpc('process_due_boost_schedules')
-        await fetchSchedules()
-      } catch {
-        /* silent */
-      }
-    }, 60_000)
+    tickerRef.current = setInterval(() => {
+      runDueSchedules().catch(err => console.error('[AutoBoost] Tick error:', err))
+    }, 30_000)
     return () => {
       if (tickerRef.current) clearInterval(tickerRef.current)
     }
-  }, [fetchAll, fetchSchedules])
+  }, [fetchAll, runDueSchedules])
 
-  /* ── Computed ── */
-  const filtered = useMemo(() =>
-    games
-      .filter(g => {
-        const s = !search || g.title.toLowerCase().includes(search.toLowerCase())
-        const c = selCat === 'all' || g.category_id === selCat || (g.category_ids && g.category_ids.includes(selCat))
-        return s && c
-      })
-      .sort((a, b) => {
-        switch (sortBy) {
-          case 'views_desc': return b.currentViews - a.currentViews
-          case 'views_asc': return a.currentViews - b.currentViews
-          case 'likes_desc': return b.currentLikes - a.currentLikes
-          case 'likes_asc': return a.currentLikes - b.currentLikes
-          case 'title': return a.title.localeCompare(b.title)
-          default: return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        }
-      }),
-    [games, search, selCat, sortBy]
-  )
+  /* ── Filtered & Sorted Games ── */
+  const filtered = useMemo(() => {
+    let result = [...games]
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      result = result.filter(g => g.title.toLowerCase().includes(q))
+    }
+    if (selCat !== 'all') {
+      result = result.filter(g => g.category_id === selCat || (g.category_ids && g.category_ids.includes(selCat)))
+    }
+    result.sort((a, b) => {
+      if (sortBy === 'views_desc') return b.currentViews - a.currentViews
+      if (sortBy === 'views_asc') return a.currentViews - b.currentViews
+      if (sortBy === 'likes_desc') return b.currentLikes - a.currentLikes
+      if (sortBy === 'likes_asc') return a.currentLikes - b.currentLikes
+      if (sortBy === 'title') return a.title.localeCompare(b.title)
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+    return result
+  }, [games, search, selCat, sortBy])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page, pageSize])
+  const totalPages = Math.ceil(filtered.length / pageSize)
+  const paginated = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, page, pageSize])
 
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages)
-  }, [page, totalPages])
-
-  const stats = useMemo(() => ({
-    games: games.length,
-    views: games.reduce((a, g) => a + g.currentViews, 0),
-    likes: games.reduce((a, g) => a + g.currentLikes, 0),
-    schedules: schedules.filter(s => s.is_active).length,
-  }), [games, schedules])
+  const stats = useMemo(() => {
+    const totalViews = games.reduce((s, g) => s + g.currentViews, 0)
+    const totalLikes = games.reduce((s, g) => s + g.currentLikes, 0)
+    const activeScheds = schedules.filter(s => s.is_active).length
+    return { games: games.length, views: totalViews, likes: totalLikes, schedules: activeScheds }
+  }, [games, schedules])
 
   /* ── Selection ── */
-  const toggleSelect = (id: string) =>
+  const toggleSelect = (id: string) => {
     setSelectedIds(p => {
-      const n = new Set(p)
-      n.has(id) ? n.delete(id) : n.add(id)
-      return n
+      const next = new Set(p)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
     })
+  }
 
   const togglePage = () => {
-    const ids = paginated.map(g => g.id)
-    const all = ids.every(id => selectedIds.has(id))
+    const curPageIds = paginated.map(g => g.id)
+    const allSelected = curPageIds.every(id => selectedIds.has(id))
     setSelectedIds(p => {
-      const n = new Set(p)
-      all ? ids.forEach(id => n.delete(id)) : ids.forEach(id => n.add(id))
-      return n
+      const next = new Set(p)
+      if (allSelected) curPageIds.forEach(id => next.delete(id))
+      else curPageIds.forEach(id => next.add(id))
+      return next
     })
   }
 
   const selectAllFilter = () => {
     setSelectedIds(new Set(filtered.map(g => g.id)))
-    toast('info', 'Selected All', `${filtered.length} games selected`)
   }
 
-  const clearSel = () => setSelectedIds(new Set())
+  const clearSel = () => {
+    setSelectedIds(new Set())
+  }
 
-  /* ── Edits ── */
-  const updateDraft = (id: string, f: 'draftViews' | 'draftLikes', v: number) =>
-    setGames(p => p.map(g => (g.id === id ? { ...g, [f]: Math.max(0, isNaN(v) ? 0 : Math.round(v)) } : g)))
+  /* ── Inline Metric Updates ── */
+  const updateDraft = (id: string, field: 'draftViews' | 'draftLikes', val: number) => {
+    setGames(p => p.map(g => (g.id === id ? { ...g, [field]: Math.max(0, val) } : g)))
+  }
 
-  const quickInc = (id: string, vd: number, ld: number) =>
-    setGames(p => p.map(g => (g.id !== id ? g : {
-      ...g,
-      draftViews: Math.max(0, g.draftViews + vd),
-      draftLikes: Math.max(0, g.draftLikes + ld),
-    })))
+  const quickInc = (id: string, viewsAdd: number, likesAdd: number) => {
+    setGames(p =>
+      p.map(g => {
+        if (g.id !== id) return g
+        return {
+          ...g,
+          draftViews: Math.max(0, g.draftViews + viewsAdd),
+          draftLikes: Math.max(0, g.draftLikes + likesAdd),
+        }
+      })
+    )
+  }
 
-  /* ── Save single ── */
-  const saveSingle = async (game: GameWithMetrics) => {
+  const saveGameMetrics = async (game: GameWithMetrics) => {
     setSavingId(game.id)
-    const res = await updateGameMetrics(game.id, { views: game.draftViews, likes: game.draftLikes })
+    try {
+      const res = await updateGameMetrics(game.id, { views: game.draftViews, likes: game.draftLikes })
+      if (res.success) {
+        setGames(p =>
+          p.map(g => (g.id === game.id ? { ...g, currentViews: g.draftViews, currentLikes: g.draftLikes } : g))
+        )
+        toast('success', 'Updated Successfully', `Updated metrics for "${game.title}"`)
+      } else {
+        toast('error', 'Update Failed', res.error || 'Database update failed')
+      }
+    } catch (e: any) {
+      toast('error', 'Error', e?.message)
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const batchBoost = async (viewsAdd: number, likesAdd: number) => {
+    if (selectedIds.size === 0) return
+    setBatchSaving(true)
+    try {
+      const updates = Array.from(selectedIds).map(id => {
+        const g = games.find(item => item.id === id)!
+        return {
+          id,
+          views: g.currentViews + viewsAdd,
+          likes: g.currentLikes + likesAdd,
+        }
+      })
+      const ok = await batchUpdateGameMetrics(updates)
+      if (ok) {
+        setGames(p =>
+          p.map(g => {
+            if (!selectedIds.has(g.id)) return g
+            const nv = g.currentViews + viewsAdd
+            const nl = g.currentLikes + likesAdd
+            return { ...g, currentViews: nv, draftViews: nv, currentLikes: nl, draftLikes: nl }
+          })
+        )
+        toast('success', 'Batch Boost Complete', `Added +${viewsAdd} views & +${likesAdd} likes to ${selectedIds.size} games`)
+        setSelectedIds(new Set())
+      }
+    } catch (e: any) {
+      toast('error', 'Batch Error', e?.message)
+    } finally {
+      setBatchSaving(false)
+    }
+  }
+
+  const applyFine = async () => {
+    if (!fineGame) return
+    const targetV = fineMode === 'increment' ? fineGame.currentViews + fineViews : fineViews
+    const targetL = fineMode === 'increment' ? fineGame.currentLikes + fineLikes : fineLikes
+    const res = await updateGameMetrics(fineGame.id, { views: targetV, likes: targetL })
     if (res.success) {
-      setGames(p => p.map(g => (g.id === game.id ? { ...g, currentViews: game.draftViews, currentLikes: game.draftLikes } : g)))
-      toast('success', 'Changes Saved', `"${game.title}" updated to ${fmtNum(game.draftViews)} views · ${fmtNum(game.draftLikes)} likes`)
+      setGames(p =>
+        p.map(g =>
+          g.id === fineGame.id
+            ? { ...g, currentViews: targetV, draftViews: targetV, currentLikes: targetL, draftLikes: targetL }
+            : g
+        )
+      )
+      toast('success', 'Updated Metrics', `Applied changes to "${fineGame.title}"`)
+      setFineGame(null)
     } else {
       toast('error', 'Update Failed', res.error || 'Database error')
     }
-    setSavingId(null)
   }
 
-  /* ── Batch boost ── */
-  const batchBoost = async (vd: number, ld: number) => {
-    if (!selectedIds.size) {
-      toast('info', 'No Games Selected', 'Please tick at least one game to boost.')
-      return
-    }
-    setBatchSaving(true)
-    const updates = games
-      .filter(g => selectedIds.has(g.id))
-      .map(g => ({ id: g.id, views: g.currentViews + vd, likes: g.currentLikes + ld }))
-    const { successCount, failureCount } = await batchUpdateGameMetrics(updates)
-    if (successCount) {
-      const map = new Map(updates.map(u => [u.id, u]))
-      setGames(p => p.map(g => {
-        const u = map.get(g.id)
-        return u ? { ...g, currentViews: u.views, draftViews: u.views, currentLikes: u.likes, draftLikes: u.likes } : g
-      }))
-      toast('success', `Boosted ${successCount} Games`, `+${fmtNum(vd)} views and +${ld} likes applied successfully`)
-    }
-    if (failureCount) {
-      toast('warning', 'Partial Boost', `${failureCount} games could not be updated`)
-    }
-    setBatchSaving(false)
-  }
-
-  /* ── Fine modal ── */
-  const applyFine = async () => {
-    if (!fineGame) return
-    const v = fineMode === 'increment' ? fineGame.currentViews + fineViews : fineViews
-    const l = fineMode === 'increment' ? fineGame.currentLikes + fineLikes : fineLikes
-    setSavingId(fineGame.id)
-    const res = await updateGameMetrics(fineGame.id, { views: Math.max(0, v), likes: Math.max(0, l) })
-    if (res.success) {
-      setGames(p => p.map(g => (g.id === fineGame.id ? { ...g, currentViews: v, draftViews: v, currentLikes: l, draftLikes: l } : g)))
-      toast('success', 'Metrics Updated', `"${fineGame.title}" set to ${fmtNum(v)} views · ${fmtNum(l)} likes`)
-      setFineGame(null)
-    } else {
-      toast('error', 'Failed', res.error || 'Database error')
-    }
-    setSavingId(null)
-  }
-
-  /* ── Schedule CRUD ── */
+  /* ── Schedule Management ── */
   const saveSchedule = async () => {
     setSavingSched(true)
     try {
-      const targetIds =
-        draft.scope === 'selected' ? Array.from(selectedIds)
-          : draft.scope === 'category' && draft.category_id
-            ? games.filter(g => g.category_id === draft.category_id || (g.category_ids && g.category_ids.includes(draft.category_id!))).map(g => g.id)
-            : games.map(g => g.id)
+      let targetIds = draft.game_ids
+      if (draft.scope === 'all') {
+        targetIds = games.map(g => g.id)
+      } else if (draft.scope === 'category' && draft.category_id) {
+        targetIds = games
+          .filter(g => g.category_id === draft.category_id || (g.category_ids && g.category_ids.includes(draft.category_id!)))
+          .map(g => g.id)
+      } else if (draft.scope === 'selected') {
+        targetIds = Array.from(selectedIds)
+      }
 
       if (targetIds.length === 0) {
         toast('warning', 'No Target Games', 'Target scope contains 0 games. Please select games or choose a category.')
@@ -419,11 +1411,35 @@ export default function AdminBoostMetrics() {
     }
   }
 
-  const runScheduleNow = async (id: string) => {
-    await (supabase as any).from('boost_schedules').update({ next_run_at: new Date().toISOString() }).eq('id', id)
-      ; (supabase as any).rpc('process_due_boost_schedules').catch(() => { })
-    toast('success', 'Triggered Now', 'Background boost execution started.')
-    setTimeout(fetchAll, 2500)
+  const runScheduleNow = async (sched: BoostSchedule) => {
+    if (boostingId) return
+    setBoostingId(sched.id)
+    toast('info', 'Boost Starting…', `Executing schedule "${sched.label || 'Unnamed'}" now.`)
+    try {
+      const fresh: BoostSchedule = { ...sched, next_run_at: new Date().toISOString() }
+      const result = await executeSchedule(fresh)
+      if (result.gamesUpdated > 0) {
+        toast('success', 'Boost Complete ⚡', `${result.gamesUpdated} games updated — +${fmtNum(result.viewsAdded)} views, +${fmtNum(result.likesAdded)} likes`)
+      } else {
+        toast('info', 'Nothing to Update', 'All games are already at or above their target values.')
+      }
+      await fetchSchedules()
+      const { data: freshGames } = await (supabase as any).from('games').select('id, view_count, views_count, likes_count')
+      if (freshGames) {
+        setGames(p => p.map(g => {
+          const fr = (freshGames as any[]).find((r: any) => r.id === g.id)
+          if (!fr) return g
+          const v = Math.max(0, fr.views_count ?? fr.view_count ?? 0)
+          const l = Math.max(0, fr.likes_count ?? 0)
+          return { ...g, currentViews: v, draftViews: v, currentLikes: l, draftLikes: l }
+        }))
+      }
+    } catch (err: any) {
+      console.error('[BoostNow] Error:', err)
+      toast('error', 'Boost Failed', err?.message || 'Unknown error occurred')
+    } finally {
+      setBoostingId(null)
+    }
   }
 
   const openEdit = (s: BoostSchedule) => {
@@ -458,868 +1474,486 @@ export default function AdminBoostMetrics() {
      RENDER
   ═══════════════════════════════════════════════════════════════════════════ */
   return (
-    <div className="min-h-screen text-slate-100 pb-28 font-sans relative overflow-x-hidden" style={{ background: '#0a0d18' }}>
-      {/* Dynamic Background Mesh Orbs */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
-        <div className="absolute -top-40 -left-40 w-[520px] h-[520px] rounded-full blur-[140px] opacity-20" style={{ background: 'radial-gradient(circle, #f97316 0%, #ec4899 100%)' }} />
-        <div className="absolute top-1/3 -right-40 w-[600px] h-[600px] rounded-full blur-[160px] opacity-20" style={{ background: 'radial-gradient(circle, #6366f1 0%, #3b82f6 100%)' }} />
-        <div className="absolute -bottom-40 left-1/4 w-[480px] h-[480px] rounded-full blur-[140px] opacity-15" style={{ background: 'radial-gradient(circle, #06b6d4 0%, #10b981 100%)' }} />
-      </div>
-
-      {/* Floating Notifications (Toast) */}
-      <div className="fixed top-5 right-5 z-[300] flex flex-col gap-2.5 w-88 max-w-[calc(100vw-2.5rem)] pointer-events-none">
-        {toasts.map(t => (
-          <div
-            key={t.id}
-            style={{ animation: 'slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)' }}
-            className={`pointer-events-auto flex items-start gap-3.5 p-4 rounded-2xl shadow-2xl border backdrop-blur-2xl transition-all ${t.type === 'success' ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-100 shadow-emerald-950/40'
-              : t.type === 'error' ? 'bg-rose-950/90 border-rose-500/30 text-rose-100 shadow-rose-950/40'
-                : t.type === 'warning' ? 'bg-amber-950/90 border-amber-500/30 text-amber-100 shadow-amber-950/40'
-                  : 'bg-indigo-950/90 border-indigo-500/30 text-indigo-100 shadow-indigo-950/40'
-              }`}
-          >
-            <div className={`mt-0.5 shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${t.type === 'success' ? 'bg-emerald-500/20 text-emerald-400'
-              : t.type === 'error' ? 'bg-rose-500/20 text-rose-400'
-                : t.type === 'warning' ? 'bg-amber-500/20 text-amber-400'
-                  : 'bg-indigo-500/20 text-indigo-400'
-              }`}>
-              {t.type === 'success' && <CheckCircle2 className="w-4 h-4" />}
-              {t.type === 'error' && <AlertCircle className="w-4 h-4" />}
-              {t.type === 'warning' && <AlertCircle className="w-4 h-4" />}
-              {t.type === 'info' && <Info className="w-4 h-4" />}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-bold text-sm leading-tight text-white">{t.title}</p>
-              <p className="text-xs opacity-80 mt-1 leading-relaxed">{t.message}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 relative z-10">
-        {/* ═══════════════════════════════════════════════════════════════════
-            TOP NAVIGATION & HEADER
-        ═══════════════════════════════════════════════════════════════════ */}
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between mb-8 pb-6 border-b border-white/[0.06]">
-          {/* Brand & Title */}
-          <div className="flex items-center gap-4">
-            <div className="relative shrink-0">
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-indigo-600 blur-md opacity-60 animate-pulse" />
-              <div className="relative w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-orange-500 via-rose-500 to-purple-600 flex items-center justify-center shadow-xl border border-white/20">
-                <Flame className="w-7 h-7 text-white drop-shadow-md" />
+    <>
+      <AdminPage $maxWidth="1380px">
+        {/* Toast Notifications */}
+        <ToastContainer>
+          {toasts.map(t => (
+            <ToastItem key={t.id} $type={t.type}>
+              <div style={{ marginTop: 2, flexShrink: 0 }}>
+                {t.type === 'success' && <CheckCircle2 size={16} color="#34d399" />}
+                {t.type === 'error' && <AlertCircle size={16} color="#f87171" />}
+                {t.type === 'warning' && <AlertCircle size={16} color="#fbbf24" />}
+                {t.type === 'info' && <Info size={16} color="#818cf8" />}
               </div>
-            </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{t.title}</div>
+                {t.message && <div style={{ fontSize: 11, opacity: 0.85, marginTop: 2 }}>{t.message}</div>}
+              </div>
+            </ToastItem>
+          ))}
+        </ToastContainer>
+
+        {/* ── Top Header ── */}
+        <HeaderBox>
+          <HeaderLeft>
+            <HeaderIcon>
+              <Flame size={24} color="#fff" />
+            </HeaderIcon>
             <div>
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Boost Metrics</h1>
-                <span className="text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-sm">
+              <HeaderTitleText>
+                Boost Metrics
+                <span style={{
+                  fontSize: 10, padding: '2px 8px', borderRadius: 999,
+                  background: 'rgba(244, 63, 94, 0.15)', color: '#fb7185',
+                  border: '1px solid rgba(244, 63, 94, 0.3)', fontWeight: 700
+                }}>
                   Engagement Hub
                 </span>
-                {stats.schedules > 0 && (
-                  <span className="flex items-center gap-1.5 text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    {stats.schedules} Active Job{stats.schedules > 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs sm:text-sm text-slate-400 font-normal">
-                Optimize game views, likes &amp; background automation schedules
-              </p>
+              </HeaderTitleText>
+              <HeaderSubText>
+                ระบบปรับแต่งยอดวิว ยอดไลก์ และตั้งเวลา Auto-Boost พื้นหลังอัตโนมัติ
+              </HeaderSubText>
             </div>
-          </div>
+          </HeaderLeft>
 
-          {/* Action Header Buttons */}
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
-            <button
-              onClick={() => setShowSqlModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] transition hover:border-purple-500/40"
-              title="Database Setup & SQL Scripts"
-            >
-              <Database className="w-4 h-4 text-purple-400" />
-              <span className="hidden sm:inline">DB Setup</span>
-            </button>
+          <HeaderActions>
+            <SecondaryBtn onClick={() => setShowSqlModal(true)} style={{ padding: '8px 14px', fontSize: 12 }}>
+              <Database size={14} color="#c084fc" /> DB Setup
+            </SecondaryBtn>
 
-            <button
-              onClick={fetchAll}
-              disabled={loading}
-              className="p-2.5 rounded-xl text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] transition hover:text-white disabled:opacity-50"
-              title="Refresh Data"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
-            </button>
+            <SecondaryBtn onClick={fetchAll} disabled={loading} style={{ padding: '8px 12px', fontSize: 12 }}>
+              <RefreshCw size={14} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            </SecondaryBtn>
 
-            <button
+            <PrimaryBtn
               onClick={() => {
                 setShowModal(true)
                 setEditSchedId(null)
                 setDraft({ ...DEFAULT_DRAFT, scope: selectedIds.size > 0 ? 'selected' : 'all' })
               }}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98]"
               style={{
-                background: 'linear-gradient(135deg, #f97316 0%, #e11d48 50%, #db2777 100%)',
-                boxShadow: '0 8px 24px rgba(225,29,72,0.3)',
+                padding: '8px 18px', fontSize: 12,
+                background: 'linear-gradient(135deg, #f97316, #e11d48)',
+                boxShadow: '0 4px 18px rgba(225, 29, 72, 0.4)'
               }}
             >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>New Schedule</span>
-            </button>
-          </div>
-        </div>
+              <Plus size={15} /> New Schedule
+            </PrimaryBtn>
+          </HeaderActions>
+        </HeaderBox>
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            KEY PERFORMANCE METRICS (CARDS)
-        ═══════════════════════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-7">
-          {[
-            {
-              label: 'Total Games',
-              value: stats.games.toLocaleString(),
-              subtext: 'Catalog games',
-              icon: <BarChart3 className="w-5 h-5 text-indigo-400" />,
-              border: 'border-indigo-500/20',
-              bgGradient: 'from-indigo-500/10 via-indigo-500/5 to-transparent',
-            },
-            {
-              label: 'Total Views',
-              value: fmtNum(stats.views),
-              subtext: `Avg ${fmtNum(stats.games ? Math.round(stats.views / stats.games) : 0)} / game`,
-              icon: <Eye className="w-5 h-5 text-cyan-400" />,
-              border: 'border-cyan-500/20',
-              bgGradient: 'from-cyan-500/10 via-cyan-500/5 to-transparent',
-            },
-            {
-              label: 'Total Likes',
-              value: fmtNum(stats.likes),
-              subtext: `Avg ${fmtNum(stats.games ? Math.round(stats.likes / stats.games) : 0)} / game`,
-              icon: <ThumbsUp className="w-5 h-5 text-rose-400" />,
-              border: 'border-rose-500/20',
-              bgGradient: 'from-rose-500/10 via-rose-500/5 to-transparent',
-            },
-            {
-              label: 'Auto Schedules',
-              value: String(stats.schedules),
-              subtext: `${schedules.length} total jobs created`,
-              icon: <Zap className="w-5 h-5 text-amber-400" />,
-              border: 'border-amber-500/20',
-              bgGradient: 'from-amber-500/10 via-amber-500/5 to-transparent',
-            },
-          ].map((card, i) => (
-            <div
-              key={i}
-              className={`relative overflow-hidden rounded-2xl border ${card.border} p-4 sm:p-5 transition-all duration-300 hover:scale-[1.01] hover:border-white/20`}
-              style={{
-                background: 'rgba(15, 20, 35, 0.65)',
-                backdropFilter: 'blur(20px)',
-              }}
-            >
-              <div className={`absolute inset-0 bg-gradient-to-br ${card.bgGradient} pointer-events-none`} />
-              <div className="relative flex items-center justify-between mb-3">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{card.label}</span>
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/[0.04] border border-white/[0.08]">
-                  {card.icon}
-                </div>
-              </div>
-              <div className="relative text-2xl sm:text-3xl font-black text-white tracking-tight tabular-nums">
-                {card.value}
-              </div>
-              <div className="relative text-[11px] text-slate-400 font-medium mt-1">
-                {card.subtext}
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* ── KPI Stats Cards (Compact 2x2 grid in Mobile) ── */}
+        <StatsGrid>
+          <StatCard $color="#7c3aed">
+            <StatHeader>
+              <StatLabel>Total Games</StatLabel>
+              <StatIconBox $color="#7c3aed"><BarChart3 size={16} /></StatIconBox>
+            </StatHeader>
+            <StatNum>{stats.games.toLocaleString()}</StatNum>
+            <StatSub>แคตตาล็อกเกมทั้งหมด</StatSub>
+          </StatCard>
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            TAB SWITCHER & VIEW LAYOUT TOGGLE
-        ═══════════════════════════════════════════════════════════════════ */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          {/* Main Tabs */}
-          <div
-            className="flex items-center p-1 rounded-2xl border border-white/[0.08] w-fit shadow-inner"
-            style={{ background: 'rgba(15, 20, 35, 0.75)', backdropFilter: 'blur(16px)' }}
-          >
-            <button
+          <StatCard $color="#06b6d4">
+            <StatHeader>
+              <StatLabel>Total Views</StatLabel>
+              <StatIconBox $color="#06b6d4"><Eye size={16} /></StatIconBox>
+            </StatHeader>
+            <StatNum>{fmtNum(stats.views)}</StatNum>
+            <StatSub>เฉลี่ย {fmtNum(stats.games ? Math.round(stats.views / stats.games) : 0)} / เกม</StatSub>
+          </StatCard>
+
+          <StatCard $color="#f43f5e">
+            <StatHeader>
+              <StatLabel>Total Likes</StatLabel>
+              <StatIconBox $color="#f43f5e"><ThumbsUp size={16} /></StatIconBox>
+            </StatHeader>
+            <StatNum>{fmtNum(stats.likes)}</StatNum>
+            <StatSub>เฉลี่ย {fmtNum(stats.games ? Math.round(stats.likes / stats.games) : 0)} / เกม</StatSub>
+          </StatCard>
+
+          <StatCard $color="#f59e0b">
+            <StatHeader>
+              <StatLabel>Auto Schedules</StatLabel>
+              <StatIconBox $color="#f59e0b"><Zap size={16} /></StatIconBox>
+            </StatHeader>
+            <StatNum>{stats.schedules}</StatNum>
+            <StatSub>{schedules.length} งานตั้งเวลาที่สร้าง</StatSub>
+          </StatCard>
+        </StatsGrid>
+
+        {/* ── Tab Switcher & Layout Toggle ── */}
+        <TabBar>
+          <TabNav>
+            <TabBtn
+              $active={activeTab === 'table'}
               onClick={() => setActiveTab('table')}
-              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === 'table'
-                ? 'text-white shadow-lg'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-                }`}
-              style={activeTab === 'table' ? { background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)', boxShadow: '0 4px 16px rgba(99,102,241,0.3)' } : {}}
             >
-              <ListChecks className="w-4 h-4" />
-              <span>Games Table</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-white/20 text-white">
-                {filtered.length}
-              </span>
-            </button>
+              <ListChecks size={15} />
+              <span>ตารางเกม</span>
+              <TabBadge $active={activeTab === 'table'}>{filtered.length}</TabBadge>
+            </TabBtn>
 
-            <button
+            <TabBtn
+              $active={activeTab === 'schedules'}
+              $gradient="linear-gradient(135deg, #f97316, #e11d48)"
               onClick={() => setActiveTab('schedules')}
-              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${activeTab === 'schedules'
-                ? 'text-white shadow-lg'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-                }`}
-              style={activeTab === 'schedules' ? { background: 'linear-gradient(135deg, #f97316 0%, #e11d48 100%)', boxShadow: '0 4px 16px rgba(225,29,72,0.3)' } : {}}
             >
-              <Clock className="w-4 h-4" />
-              <span>Auto-Boost Schedules</span>
+              <Clock size={15} />
+              <span>Auto-Boost</span>
               {stats.schedules > 0 && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
-                  {stats.schedules}
-                </span>
+                <TabBadge $active={activeTab === 'schedules'}>{stats.schedules}</TabBadge>
               )}
-            </button>
-          </div>
+            </TabBtn>
+          </TabNav>
 
-          {/* Desktop Layout Switcher (Table vs Grid Cards) */}
           {activeTab === 'table' && (
-            <div className="hidden md:flex items-center gap-1.5 p-1 rounded-xl border border-white/[0.06] bg-slate-900/60 backdrop-blur-md">
-              <button
-                onClick={() => setViewLayout('table')}
-                className={`p-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${viewLayout === 'table' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                title="Table View"
-              >
-                <LayoutList className="w-4 h-4" />
-                <span>Table</span>
-              </button>
-              <button
-                onClick={() => setViewLayout('grid')}
-                className={`p-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${viewLayout === 'grid' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                title="Grid Cards View"
-              >
-                <LayoutGrid className="w-4 h-4" />
-                <span>Cards</span>
-              </button>
-            </div>
+            <ViewToggle>
+              <ViewBtn $active={viewLayout === 'table'} onClick={() => setViewLayout('table')}>
+                <LayoutList size={13} /> Table
+              </ViewBtn>
+              <ViewBtn $active={viewLayout === 'grid'} onClick={() => setViewLayout('grid')}>
+                <LayoutGrid size={13} /> Cards
+              </ViewBtn>
+            </ViewToggle>
           )}
-        </div>
+        </TabBar>
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            TAB CONTENT: GAMES
-        ═══════════════════════════════════════════════════════════════════ */}
+        {/* ── TAB 1: GAMES TABLE ── */}
         {activeTab === 'table' && (
-          <div className="space-y-4">
-            {/* Filter / Search Bar */}
-            <div
-              className="p-3.5 sm:p-4 rounded-2xl border border-white/[0.08] shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-3"
-              style={{ background: 'rgba(15, 20, 35, 0.75)', backdropFilter: 'blur(20px)' }}
-            >
-              {/* Search Box */}
-              <div className="relative flex-1 min-w-0 max-w-md">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                <input
-                  type="text"
+          <div>
+            {/* Toolbar Search & Filters */}
+            <FilterBar>
+              <SearchWrap style={{ flex: '1 1 220px', maxWidth: 360 }}>
+                <SearchIcon><Search size={14} /></SearchIcon>
+                <SearchInput
+                  placeholder="ค้นหาชื่อเกม..."
                   value={search}
                   onChange={e => { setSearch(e.target.value); setPage(1) }}
-                  placeholder="Search games by title..."
-                  className="w-full rounded-xl bg-white/[0.04] border border-white/10 focus:border-indigo-500/60 pl-10 pr-9 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none transition shadow-inner"
+                  style={{ fontSize: 13, padding: '9px 12px 9px 38px' }}
                 />
-                {search && (
-                  <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition">
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+              </SearchWrap>
 
-              {/* Dropdown Filters */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Category Dropdown */}
-                <div className="relative">
-                  <select
-                    value={selCat}
-                    onChange={e => { setSelCat(e.target.value); setPage(1) }}
-                    className="bg-white/[0.05] border border-white/10 hover:border-white/20 rounded-xl px-3.5 py-2.5 pr-8 text-xs sm:text-sm text-slate-200 focus:outline-none appearance-none cursor-pointer focus:border-indigo-500/60 transition"
-                  >
-                    <option value="all" className="bg-slate-900 text-white">All Categories ({categories.length})</option>
-                    {categories.map(c => (
-                      <option key={c.id} value={c.id} className="bg-slate-900 text-white">{c.name}</option>
-                    ))}
-                  </select>
-                  <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                </div>
+              <FilterGroup>
+                <StyledSelect value={selCat} onChange={e => { setSelCat(e.target.value); setPage(1) }}>
+                  <option value="all">หมวดหมู่ทั้งหมด ({categories.length})</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </StyledSelect>
 
-                {/* Sort Dropdown */}
-                <div className="relative">
-                  <select
-                    value={sortBy}
-                    onChange={e => setSortBy(e.target.value as typeof sortBy)}
-                    className="bg-white/[0.05] border border-white/10 hover:border-white/20 rounded-xl px-3.5 py-2.5 pr-8 text-xs sm:text-sm text-slate-200 focus:outline-none appearance-none cursor-pointer focus:border-indigo-500/60 transition"
-                  >
-                    <option value="views_desc" className="bg-slate-900 text-white">👁 Views: High → Low</option>
-                    <option value="views_asc" className="bg-slate-900 text-white">📉 Views: Low → High</option>
-                    <option value="likes_desc" className="bg-slate-900 text-white">❤️ Likes: High → Low</option>
-                    <option value="likes_asc" className="bg-slate-900 text-white">🤍 Likes: Low → High</option>
-                    <option value="newest" className="bg-slate-900 text-white">⏱ Date: Newest First</option>
-                    <option value="title" className="bg-slate-900 text-white">🔤 Title: A → Z</option>
-                  </select>
-                  <ArrowUpDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                </div>
+                <StyledSelect value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+                  <option value="views_desc">👁 วิว: มาก → น้อย</option>
+                  <option value="views_asc">📉 วิว: น้อย → มาก</option>
+                  <option value="likes_desc">❤️ ไลก์: มาก → น้อย</option>
+                  <option value="likes_asc">🤍 ไลก์: น้อย → มาก</option>
+                  <option value="newest">⏱ ล่าสุด</option>
+                  <option value="title">🔤 ชื่อ A → Z</option>
+                </StyledSelect>
 
-                {/* Page Size */}
-                <select
-                  value={pageSize}
-                  onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
-                  className="bg-white/[0.05] border border-white/10 rounded-xl px-2.5 py-2.5 text-xs text-slate-300 focus:outline-none cursor-pointer"
-                >
-                  {[10, 15, 25, 50].map(s => (
-                    <option key={s} value={s} className="bg-slate-900 text-white">{s} / page</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+                <StyledSelect value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}>
+                  {[10, 15, 25, 50].map(n => <option key={n} value={n}>{n} / หน้า</option>)}
+                </StyledSelect>
+              </FilterGroup>
+            </FilterBar>
 
-            {/* Sticky Floating Bulk Action Bar */}
+            {/* Bulk Action Floating Bar */}
             {selectedIds.size > 0 && (
-              <div
-                className="p-3.5 sm:p-4 rounded-2xl border border-indigo-500/30 flex flex-wrap items-center justify-between gap-3 shadow-2xl transition-all"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.95) 0%, rgba(49, 46, 129, 0.95) 100%)',
-                  backdropFilter: 'blur(20px)',
-                  boxShadow: '0 12px 36px rgba(79,70,229,0.3)',
-                }}
-              >
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
-                    <span className="text-xs sm:text-sm font-black text-white">
-                      {selectedIds.size} game{selectedIds.size > 1 ? 's' : ''} selected
-                    </span>
+              <BulkBar>
+                <BulkInfo>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: 13, color: '#fff' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22d3ee', display: 'inline-block' }} />
+                    เลือกอยู่ {selectedIds.size} เกม
                   </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <button
-                      onClick={selectAllFilter}
-                      className="text-indigo-200 hover:text-white underline font-semibold transition"
-                    >
-                      Select all {filtered.length}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                    <button onClick={selectAllFilter} style={{ background: 'none', border: 'none', color: '#c7d2fe', cursor: 'pointer', textDecoration: 'underline' }}>
+                      เลือกทั้งหมด {filtered.length} เกม
                     </button>
-                    <span className="text-white/20">|</span>
-                    <button
-                      onClick={clearSel}
-                      className="text-slate-400 hover:text-white transition font-medium"
-                    >
-                      Deselect
+                    <span style={{ opacity: 0.3 }}>|</span>
+                    <button onClick={clearSel} style={{ background: 'none', border: 'none', color: 'rgba(148, 163, 184, 0.7)', cursor: 'pointer' }}>
+                      ยกเลิก
                     </button>
                   </div>
-                </div>
+                </BulkInfo>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-indigo-200 font-semibold hidden md:inline">Quick Boost:</span>
+                <BulkActions>
+                  <span style={{ fontSize: 11, color: 'rgba(199, 210, 254, 0.8)', fontWeight: 600 }}>Quick:</span>
                   {[
                     { v: 100, l: 20, label: '+100 👁' },
                     { v: 500, l: 75, label: '+500 👁' },
                     { v: 1000, l: 150, label: '+1k 👁' },
                   ].map(b => (
-                    <button
+                    <QuickPill
                       key={b.v}
+                      $color="#06b6d4"
                       disabled={batchSaving}
                       onClick={() => batchBoost(b.v, b.l)}
-                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-white transition hover:scale-105 active:scale-95 disabled:opacity-50"
+                      style={{ padding: '4px 10px', fontSize: 11 }}
                     >
                       {b.label}
-                    </button>
+                    </QuickPill>
                   ))}
 
-                  <button
+                  <PrimaryBtn
                     onClick={() => {
                       setShowModal(true)
                       setDraft({ ...DEFAULT_DRAFT, scope: 'selected' })
                     }}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-amber-200 border border-amber-400/40 bg-amber-500/20 hover:bg-amber-500/30 transition shadow-sm"
+                    style={{
+                      padding: '6px 14px', fontSize: 11,
+                      background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                      boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)'
+                    }}
                   >
-                    <Clock className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Schedule For Selected</span>
-                  </button>
-                </div>
-              </div>
+                    <Clock size={12} /> ตั้งเวลา Auto-Boost
+                  </PrimaryBtn>
+                </BulkActions>
+              </BulkBar>
             )}
 
-            {/* ─── GAMES VIEW: TABLE OR CARDS ─── */}
-            <div
-              className="rounded-3xl border border-white/[0.08] overflow-hidden shadow-2xl"
-              style={{ background: 'rgba(15, 20, 35, 0.75)', backdropFilter: 'blur(24px)' }}
-            >
+            {/* Table Container */}
+            <TableSection>
+              <TableHeadRow>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={paginated.length > 0 && paginated.every(g => selectedIds.has(g.id))}
+                    onChange={togglePage}
+                    style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#7c3aed' }}
+                  />
+                </div>
+                <div>ข้อมูลเกม (Game)</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#22d3ee' }}>
+                  <Eye size={14} /> Views (ยอดวิว)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#fb7185' }}>
+                  <ThumbsUp size={14} /> Likes (ยอดไลก์)
+                </div>
+                <div style={{ textAlign: 'right' }}>Actions</div>
+              </TableHeadRow>
+
               {loading ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-28 text-center">
-                  <RefreshCw className="w-9 h-9 text-indigo-400 animate-spin" />
-                  <p className="text-sm font-semibold text-slate-300">Loading game catalogue...</p>
-                  <p className="text-xs text-slate-500">Fetching metrics and thumbnail covers</p>
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'rgba(148, 163, 184, 0.6)' }}>
+                  <RefreshCw size={26} style={{ animation: 'spin 0.8s linear infinite', margin: '0 auto 10px', color: '#7c3aed' }} />
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>กำลังโหลดรายการเกม...</div>
                 </div>
               ) : filtered.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-28 text-center">
-                  <Search className="w-12 h-12 text-slate-600" />
-                  <p className="text-base text-slate-200 font-bold">No matching games found</p>
-                  <p className="text-xs text-slate-500">Try adjusting your search query or category filters</p>
+                <div style={{ padding: '50px 20px', textAlign: 'center', color: 'rgba(148, 163, 184, 0.5)' }}>
+                  <Search size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>ไม่พบเกมที่ตรงกับเงื่อนไข</div>
                 </div>
               ) : (
-                <>
-                  {/* ─────────────────────────────────────────────────────────────
-                      DESKTOP TABLE VIEW (Visible on md+ screens when table layout active)
-                  ───────────────────────────────────────────────────────────── */}
-                  <div className={`overflow-x-auto ${viewLayout === 'grid' ? 'hidden' : 'hidden md:block'}`}>
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="border-b border-white/[0.08] bg-black/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                          <th className="py-4 px-4 w-12 text-center">
-                            <input
-                              type="checkbox"
-                              checked={paginated.length > 0 && paginated.every(g => selectedIds.has(g.id))}
-                              onChange={togglePage}
-                              className="rounded-md bg-white/10 border-white/20 text-indigo-600 focus:ring-0 cursor-pointer w-4 h-4"
-                            />
-                          </th>
-                          <th className="py-4 px-4 text-left">Game</th>
-                          <th className="py-4 px-4 text-left min-w-[260px]">
-                            <div className="flex items-center gap-1.5 text-cyan-400">
-                              <Eye className="w-4 h-4" />
-                              <span>Views (ยอดวิว)</span>
-                            </div>
-                          </th>
-                          <th className="py-4 px-4 text-left min-w-[260px]">
-                            <div className="flex items-center gap-1.5 text-rose-400">
-                              <ThumbsUp className="w-4 h-4" />
-                              <span>Likes (ยอดไลก์)</span>
-                            </div>
-                          </th>
-                          <th className="py-4 px-5 text-right w-36">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/[0.04]">
-                        {paginated.map(game => {
-                          const modified = game.draftViews !== game.currentViews || game.draftLikes !== game.currentLikes
-                          const saving = savingId === game.id
-                          const hasSched = !!game.activeScheduleId
-                          const sched = hasSched ? schedules.find(s => s.id === game.activeScheduleId) : null
+                paginated.map(g => {
+                  const modified = g.draftViews !== g.currentViews || g.draftLikes !== g.currentLikes
+                  const saving = savingId === g.id
+                  const isSelected = selectedIds.has(g.id)
 
-                          return (
-                            <tr
-                              key={game.id}
-                              className={`group transition-colors hover:bg-white/[0.03] ${selectedIds.has(game.id) ? 'bg-indigo-500/[0.08]' : ''
-                                }`}
-                            >
-                              {/* Checkbox */}
-                              <td className="py-4 px-4 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedIds.has(game.id)}
-                                  onChange={() => toggleSelect(game.id)}
-                                  className="rounded-md bg-white/10 border-white/20 text-indigo-600 focus:ring-0 cursor-pointer w-4 h-4"
-                                />
-                              </td>
+                  return (
+                    <TableItemRow key={g.id} $selected={isSelected}>
+                      {/* Checkbox */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(g.id)}
+                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#7c3aed' }}
+                        />
+                      </div>
 
-                              {/* Game Information */}
-                              <td className="py-4 px-4">
-                                <div className="flex items-center gap-3.5">
-                                  <div className="w-12 h-15 rounded-xl overflow-hidden bg-slate-800 shrink-0 border border-white/10 shadow-md group-hover:border-indigo-500/40 transition">
-                                    {game.cover_image ? (
-                                      <img
-                                        src={game.cover_image.split('#')[0]}
-                                        alt={game.title}
-                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                      />
-                                    ) : (
-                                      <div className="w-full h-full flex items-center justify-center text-xl">🎮</div>
-                                    )}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-1.5 mb-1">
-                                      <span className="font-bold text-white text-sm line-clamp-1 group-hover:text-indigo-300 transition-colors">
-                                        {game.title}
-                                      </span>
-                                      <a
-                                        href={`/game/${game.slug}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-indigo-400 transition shrink-0"
-                                      >
-                                        <ExternalLink className="w-3.5 h-3.5" />
-                                      </a>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/25">
-                                        {game.categoryName}
-                                      </span>
-                                      {game.is_featured && (
-                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/15 text-amber-300 border border-amber-500/25">
-                                          FEATURED
-                                        </span>
-                                      )}
-                                      {hasSched && sched && (
-                                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                          AUTO {intervalLabel(sched.interval_unit, sched.interval_value)}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* Views Column */}
-                              <td className="py-4 px-4">
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono text-slate-400 w-12 text-right tabular-nums font-semibold shrink-0">
-                                      {fmtNum(game.currentViews)}
-                                    </span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      value={game.draftViews}
-                                      onChange={e => updateDraft(game.id, 'draftViews', parseInt(e.target.value) || 0)}
-                                      className={`w-28 rounded-xl border px-3 py-1.5 text-xs text-white bg-black/30 focus:outline-none transition ${game.draftViews !== game.currentViews
-                                        ? 'border-cyan-400 text-cyan-300 font-bold shadow-sm'
-                                        : 'border-white/10 hover:border-white/20 focus:border-cyan-500/60'
-                                        }`}
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-1 ml-14">
-                                    {[50, 100, 500].map(v => (
-                                      <button
-                                        key={v}
-                                        onClick={() => quickInc(game.id, v, 0)}
-                                        className="px-2 py-0.5 rounded-lg text-[10px] font-bold text-cyan-400 border border-cyan-500/25 bg-cyan-500/10 hover:bg-cyan-500/20 transition hover:scale-105 active:scale-95"
-                                      >
-                                        +{fmtNum(v)}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* Likes Column */}
-                              <td className="py-4 px-4">
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono text-slate-400 w-12 text-right tabular-nums font-semibold shrink-0">
-                                      {fmtNum(game.currentLikes)}
-                                    </span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      value={game.draftLikes}
-                                      onChange={e => updateDraft(game.id, 'draftLikes', parseInt(e.target.value) || 0)}
-                                      className={`w-28 rounded-xl border px-3 py-1.5 text-xs text-white bg-black/30 focus:outline-none transition ${game.draftLikes !== game.currentLikes
-                                        ? 'border-rose-400 text-rose-300 font-bold shadow-sm'
-                                        : 'border-white/10 hover:border-white/20 focus:border-rose-500/60'
-                                        }`}
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-1 ml-14">
-                                    {[10, 25, 100].map(l => (
-                                      <button
-                                        key={l}
-                                        onClick={() => quickInc(game.id, 0, l)}
-                                        className="px-2 py-0.5 rounded-lg text-[10px] font-bold text-rose-400 border border-rose-500/25 bg-rose-500/10 hover:bg-rose-500/20 transition hover:scale-105 active:scale-95"
-                                      >
-                                        +{l}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* Actions Column */}
-                              <td className="py-4 px-5 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setFineGame(game)
-                                      setFineMode('increment')
-                                      setFineViews(250)
-                                      setFineLikes(50)
-                                    }}
-                                    className="p-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-white border border-white/[0.08] transition"
-                                    title="Precision Adjuster"
-                                  >
-                                    <Sliders className="w-4 h-4" />
-                                  </button>
-
-                                  <button
-                                    disabled={!modified || saving}
-                                    onClick={() => saveSingle(game)}
-                                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md ${modified
-                                      ? 'text-white shadow-emerald-950/40 hover:scale-105 active:scale-95 cursor-pointer'
-                                      : 'bg-white/[0.02] text-slate-600 border border-white/[0.05] cursor-not-allowed'
-                                      }`}
-                                    style={modified ? { background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' } : {}}
-                                  >
-                                    {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                                    <span>Save</span>
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* ─────────────────────────────────────────────────────────────
-                      MOBILE CARDS / GRID CARDS VIEW
-                      (Always shown on mobile < md, or on desktop when Grid view chosen)
-                  ───────────────────────────────────────────────────────────── */}
-                  <div className={`${viewLayout === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4' : 'md:hidden divide-y divide-white/[0.06]'}`}>
-                    {paginated.map(game => {
-                      const modified = game.draftViews !== game.currentViews || game.draftLikes !== game.currentLikes
-                      const saving = savingId === game.id
-                      const hasSched = !!game.activeScheduleId
-                      const sched = hasSched ? schedules.find(s => s.id === game.activeScheduleId) : null
-
-                      return (
-                        <div
-                          key={game.id}
-                          className={`p-4 transition-colors ${viewLayout === 'grid' ? 'rounded-2xl border border-white/[0.08] bg-white/[0.02]' : ''} ${selectedIds.has(game.id) ? 'bg-indigo-500/[0.08]' : ''
-                            }`}
-                        >
-                          {/* Card Header: Cover, Title, Checkbox */}
-                          <div className="flex items-start gap-3 mb-3.5">
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(game.id)}
-                              onChange={() => toggleSelect(game.id)}
-                              className="mt-1 rounded-md bg-white/10 border-white/20 text-indigo-600 focus:ring-0 cursor-pointer w-4 h-4 shrink-0"
-                            />
-                            <div className="w-12 h-15 rounded-xl overflow-hidden bg-slate-800 shrink-0 border border-white/10 shadow-md">
-                              {game.cover_image ? (
-                                <img src={game.cover_image.split('#')[0]} alt={game.title} className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-xl">🎮</div>
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-2">
-                                <h4 className="font-bold text-white text-sm line-clamp-2 leading-snug">{game.title}</h4>
-                                <a
-                                  href={`/game/${game.slug}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-slate-500 hover:text-indigo-400 transition shrink-0 p-1"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
-                              </div>
-                              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/25">
-                                  {game.categoryName}
-                                </span>
-                                {game.is_featured && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/15 text-amber-300 border border-amber-500/25">
-                                    FEATURED
-                                  </span>
-                                )}
-                                {hasSched && sched && (
-                                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                    AUTO
-                                  </span>
-                                )}
-                              </div>
-                            </div>
+                      {/* Game Details */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                        {g.cover_image ? (
+                          <GameThumb src={g.cover_image.split('#')[0]} alt={g.title} />
+                        ) : (
+                          <GameThumbPlaceholder>🎮</GameThumbPlaceholder>
+                        )}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {g.title}
+                            </span>
+                            <a href={`/game/${g.slug}`} target="_blank" rel="noreferrer" style={{ color: 'rgba(148, 163, 184, 0.4)', display: 'inline-flex' }}>
+                              <ExternalLink size={12} />
+                            </a>
                           </div>
-
-                          {/* Dual Metric Input Panels */}
-                          <div className="grid grid-cols-2 gap-2.5 mb-3">
-                            {/* Views Box */}
-                            <div className="p-3 rounded-xl border border-cyan-500/20 bg-cyan-950/20">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
-                                  <Eye className="w-3 h-3" /> Views
-                                </span>
-                                <span className="text-[11px] font-mono text-slate-400 font-bold">
-                                  {fmtNum(game.currentViews)}
-                                </span>
-                              </div>
-                              <input
-                                type="number"
-                                min="0"
-                                value={game.draftViews}
-                                onChange={e => updateDraft(game.id, 'draftViews', parseInt(e.target.value) || 0)}
-                                className={`w-full rounded-lg border bg-black/40 px-2.5 py-1.5 text-xs text-white focus:outline-none transition ${game.draftViews !== game.currentViews
-                                  ? 'border-cyan-400 text-cyan-300 font-bold'
-                                  : 'border-white/10'
-                                  }`}
-                              />
-                              <div className="flex gap-1 mt-2">
-                                {[50, 100, 500].map(v => (
-                                  <button
-                                    key={v}
-                                    onClick={() => quickInc(game.id, v, 0)}
-                                    className="flex-1 py-1 rounded-md text-[9px] font-bold text-cyan-400 border border-cyan-500/25 bg-cyan-500/10 active:scale-95 transition"
-                                  >
-                                    +{fmtNum(v)}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Likes Box */}
-                            <div className="p-3 rounded-xl border border-rose-500/20 bg-rose-950/20">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1">
-                                  <ThumbsUp className="w-3 h-3" /> Likes
-                                </span>
-                                <span className="text-[11px] font-mono text-slate-400 font-bold">
-                                  {fmtNum(game.currentLikes)}
-                                </span>
-                              </div>
-                              <input
-                                type="number"
-                                min="0"
-                                value={game.draftLikes}
-                                onChange={e => updateDraft(game.id, 'draftLikes', parseInt(e.target.value) || 0)}
-                                className={`w-full rounded-lg border bg-black/40 px-2.5 py-1.5 text-xs text-white focus:outline-none transition ${game.draftLikes !== game.currentLikes
-                                  ? 'border-rose-400 text-rose-300 font-bold'
-                                  : 'border-white/10'
-                                  }`}
-                              />
-                              <div className="flex gap-1 mt-2">
-                                {[10, 25, 100].map(l => (
-                                  <button
-                                    key={l}
-                                    onClick={() => quickInc(game.id, 0, l)}
-                                    className="flex-1 py-1 rounded-md text-[9px] font-bold text-rose-400 border border-rose-500/25 bg-rose-500/10 active:scale-95 transition"
-                                  >
-                                    +{l}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Card Footer Actions */}
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                setFineGame(game)
-                                setFineMode('increment')
-                                setFineViews(250)
-                                setFineLikes(50)
-                              }}
-                              className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-slate-400 hover:text-white transition"
-                              title="Fine-tune values"
-                            >
-                              <Sliders className="w-4 h-4" />
-                            </button>
-                            <button
-                              disabled={!modified || saving}
-                              onClick={() => saveSingle(game)}
-                              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${modified
-                                ? 'text-white shadow-lg shadow-emerald-950/40'
-                                : 'bg-white/[0.02] text-slate-600 border border-white/[0.05] cursor-not-allowed'
-                                }`}
-                              style={modified ? { background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)' } : {}}
-                            >
-                              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                              <span>{modified ? 'Save Changes' : 'Saved'}</span>
-                            </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 5, background: 'rgba(124, 58, 237, 0.15)', color: '#c084fc', border: '1px solid rgba(124, 58, 237, 0.3)' }}>
+                              {g.categoryName}
+                            </span>
+                            {g.is_featured && (
+                              <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 5, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                                FEATURED
+                              </span>
+                            )}
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                </>
+                      </div>
+
+                      {/* Views Column */}
+                      <MetricControl>
+                        <MetricInputRow>
+                          <span style={{ width: 44, textAlign: 'right', fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#94a3b8' }}>
+                            {fmtNum(g.currentViews)}
+                          </span>
+                          <MetricInput
+                            type="number"
+                            min="0"
+                            value={g.draftViews}
+                            $changed={g.draftViews !== g.currentViews}
+                            $color="#22d3ee"
+                            onChange={e => updateDraft(g.id, 'draftViews', parseInt(e.target.value) || 0)}
+                          />
+                        </MetricInputRow>
+                        <div style={{ display: 'flex', gap: 4, marginLeft: 52 }}>
+                          {[50, 100, 500].map(v => (
+                            <QuickPill key={v} $color="#06b6d4" onClick={() => quickInc(g.id, v, 0)}>
+                              +{v}
+                            </QuickPill>
+                          ))}
+                        </div>
+                      </MetricControl>
+
+                      {/* Likes Column */}
+                      <MetricControl>
+                        <MetricInputRow>
+                          <span style={{ width: 44, textAlign: 'right', fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#94a3b8' }}>
+                            {fmtNum(g.currentLikes)}
+                          </span>
+                          <MetricInput
+                            type="number"
+                            min="0"
+                            value={g.draftLikes}
+                            $changed={g.draftLikes !== g.currentLikes}
+                            $color="#fb7185"
+                            onChange={e => updateDraft(g.id, 'draftLikes', parseInt(e.target.value) || 0)}
+                          />
+                        </MetricInputRow>
+                        <div style={{ display: 'flex', gap: 4, marginLeft: 52 }}>
+                          {[10, 25, 100].map(l => (
+                            <QuickPill key={l} $color="#f43f5e" onClick={() => quickInc(g.id, 0, l)}>
+                              +{l}
+                            </QuickPill>
+                          ))}
+                        </div>
+                      </MetricControl>
+
+                      {/* Actions Column */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                        <SecondaryBtn
+                          onClick={() => {
+                            setFineGame(g)
+                            setFineViews(250)
+                            setFineLikes(50)
+                          }}
+                          style={{ padding: '7px 9px', borderRadius: 8 }}
+                          title="Fine-tune Adjuster"
+                        >
+                          <Sliders size={13} />
+                        </SecondaryBtn>
+
+                        <PrimaryBtn
+                          onClick={() => saveGameMetrics(g)}
+                          disabled={!modified || saving}
+                          style={{
+                            padding: '7px 12px', borderRadius: 8, fontSize: 11,
+                            background: modified
+                              ? 'linear-gradient(135deg, #10b981, #06b6d4)'
+                              : 'rgba(255, 255, 255, 0.05)',
+                            color: modified ? '#fff' : 'rgba(148, 163, 184, 0.4)',
+                            boxShadow: modified ? '0 4px 14px rgba(16, 185, 129, 0.4)' : 'none',
+                          }}
+                        >
+                          {saving ? <RefreshCw size={13} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Save size={13} />}
+                          <span>บันทึก</span>
+                        </PrimaryBtn>
+                      </div>
+                    </TableItemRow>
+                  )
+                })
               )}
 
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <div
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border-t border-white/[0.08] bg-black/40 text-xs"
-                >
-                  <span className="text-slate-400 text-center sm:text-left">
-                    Showing <strong className="text-white">{(page - 1) * pageSize + 1}</strong> – <strong className="text-white">{Math.min(page * pageSize, filtered.length)}</strong> of <strong className="text-white">{filtered.length}</strong> games
-                  </span>
-                  <div className="flex items-center justify-center gap-1.5">
-                    <button
-                      disabled={page === 1}
-                      onClick={() => setPage(1)}
-                      className="px-2.5 py-1.5 rounded-lg border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-slate-300 font-semibold"
-                    >
-                      First
-                    </button>
-                    <button
-                      disabled={page === 1}
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      className="p-1.5 rounded-lg border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-slate-300"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <span className="px-3 py-1.5 rounded-lg bg-white/10 text-white font-bold tabular-nums">
-                      {page} / {totalPages}
-                    </span>
-                    <button
-                      disabled={page === totalPages}
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                      className="p-1.5 rounded-lg border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-slate-300"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                    <button
-                      disabled={page === totalPages}
-                      onClick={() => setPage(totalPages)}
-                      className="px-2.5 py-1.5 rounded-lg border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-slate-300 font-semibold"
-                    >
-                      Last
-                    </button>
-                  </div>
+              {/* Pagination Row */}
+              <PaginationWrap>
+                <div style={{ fontSize: 12, color: 'rgba(148, 163, 184, 0.6)' }}>
+                  แสดง {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, filtered.length)} จากทั้งหมด {filtered.length} เกม
                 </div>
-              )}
-            </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <PageBtn disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                    <ChevronLeft size={15} />
+                  </PageBtn>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pNum = Math.max(1, Math.min(page - 2, totalPages - 4)) + i
+                    if (pNum > totalPages) return null
+                    return (
+                      <PageBtn key={pNum} $active={page === pNum} onClick={() => setPage(pNum)}>
+                        {pNum}
+                      </PageBtn>
+                    )
+                  })}
+                  <PageBtn disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                    <ChevronRight size={15} />
+                  </PageBtn>
+                </div>
+              </PaginationWrap>
+            </TableSection>
           </div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            TAB CONTENT: AUTO-BOOST SCHEDULES
-        ═══════════════════════════════════════════════════════════════════ */}
+        {/* ── TAB 2: AUTO-BOOST SCHEDULES ── */}
         {activeTab === 'schedules' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-2xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl">
+          <div>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 16, flexWrap: 'wrap', gap: 10
+            }}>
               <div>
-                <h3 className="font-bold text-white text-base">Background Auto-Boost Workers</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Automated schedules execute repeatedly even when offline or browser closed</p>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: '#fff', margin: 0 }}>
+                  รายการตั้งเวลาเพิ่มยอดอัตโนมัติ (Active Auto-Boost Workers)
+                </h2>
+                <p style={{ fontSize: 12, color: 'rgba(148, 163, 184, 0.6)', marginTop: 2 }}>
+                  ระบบจะทำงานเป็นระยะตามเวลาที่กำหนด แม้ว่าจะปิดหน้าเบราว์เซอร์ไปแล้ว
+                </p>
               </div>
-              <button
+
+              <PrimaryBtn
                 onClick={() => {
                   setShowModal(true)
                   setEditSchedId(null)
-                  setDraft({ ...DEFAULT_DRAFT, scope: selectedIds.size > 0 ? 'selected' : 'all' })
+                  setDraft({ ...DEFAULT_DRAFT })
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-lg transition hover:scale-105 active:scale-95"
-                style={{ background: 'linear-gradient(135deg, #f97316 0%, #e11d48 100%)' }}
+                style={{
+                  padding: '9px 18px', fontSize: 12,
+                  background: 'linear-gradient(135deg, #f97316, #e11d48)',
+                  boxShadow: '0 4px 18px rgba(225, 29, 72, 0.4)'
+                }}
               >
-                <Plus className="w-4 h-4 stroke-[2.5]" />
-                <span>Create Schedule</span>
-              </button>
+                <Plus size={15} /> สร้าง Schedule ใหม่
+              </PrimaryBtn>
             </div>
 
-            {schedLoading ? (
-              <div className="py-20 text-center">
-                <RefreshCw className="w-8 h-8 text-amber-400 animate-spin mx-auto mb-3" />
-                <p className="text-sm text-slate-400">Loading schedules...</p>
-              </div>
-            ) : schedules.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl border border-white/[0.08] bg-slate-900/40">
-                <Clock className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h4 className="text-base font-bold text-white mb-1">No Active Schedules</h4>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto mb-5">
-                  Set up background jobs to continuously increase views and likes automatically over time.
+            {schedules.length === 0 ? (
+              <div style={{
+                background: 'rgba(20, 20, 38, 0.7)',
+                borderRadius: 20, padding: '50px 20px',
+                textAlign: 'center', border: '1px solid rgba(255, 255, 255, 0.06)'
+              }}>
+                <Clock size={36} style={{ color: '#f97316', margin: '0 auto 12px', opacity: 0.5 }} />
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>ยังไม่มีรายการตั้งเวลา (No Active Schedules)</div>
+                <p style={{ fontSize: 12, color: 'rgba(148, 163, 184, 0.6)', maxWidth: 400, margin: '6px auto 16px' }}>
+                  สร้างตัวตั้งเวลาแรกของคุณ เพื่อให้ระบบช่วยเพิ่มยอดวิวและไลก์ให้อัตโนมัติทุกๆ 1 นาที หรือ 1 ชั่วโมง
                 </p>
-                <button
+                <PrimaryBtn
                   onClick={() => {
                     setShowModal(true)
                     setEditSchedId(null)
                     setDraft({ ...DEFAULT_DRAFT })
                   }}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white shadow-lg"
-                  style={{ background: 'linear-gradient(135deg, #f97316 0%, #e11d48 100%)' }}
+                  style={{ background: 'linear-gradient(135deg, #f97316, #e11d48)' }}
                 >
-                  Create Your First Schedule
-                </button>
+                  <Plus size={15} /> สร้าง Auto-Boost Schedule
+                </PrimaryBtn>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <SchedulesGrid>
                 {schedules.map(s => {
                   const scopeCount =
                     s.scope === 'all' ? games.length
@@ -1328,234 +1962,259 @@ export default function AdminBoostMetrics() {
                         : (s.game_ids || []).length
 
                   return (
-                    <div
-                      key={s.id}
-                      className="p-5 rounded-2xl border border-white/[0.08] bg-slate-900/60 backdrop-blur-xl relative overflow-hidden transition hover:border-white/20 shadow-xl"
-                    >
-                      {/* Top status bar */}
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 ${s.is_active
-                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                              : 'bg-slate-700/40 text-slate-400 border border-slate-600/30'
-                              }`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${s.is_active ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-                            {s.is_active ? 'Active' : 'Paused'}
+                    <SchedCard key={s.id}>
+                      {/* Header */}
+                      <SchedHeader>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{
+                            padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 800,
+                            background: s.is_active ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                            color: s.is_active ? '#34d399' : '#94a3b8',
+                            border: `1px solid ${s.is_active ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.25)'}`,
+                            display: 'inline-flex', alignItems: 'center', gap: 5
+                          }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.is_active ? '#34d399' : '#94a3b8' }} />
+                            {s.is_active ? 'ACTIVE' : 'PAUSED'}
                           </span>
-                          <span className="text-xs font-bold text-slate-300">
+                          <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>
                             {s.label || 'Auto-Boost Worker'}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1">
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <button
                             onClick={() => toggleScheduleActive(s)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
-                            title={s.is_active ? 'Pause Schedule' : 'Resume Schedule'}
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.08)',
+                              padding: 5, borderRadius: 7, cursor: 'pointer', color: s.is_active ? '#fbbf24' : '#34d399'
+                            }}
+                            title={s.is_active ? 'พักการทำงาน' : 'เปิดทำงาน'}
                           >
-                            {s.is_active ? <PauseCircle className="w-4 h-4 text-amber-400" /> : <PlayCircle className="w-4 h-4 text-emerald-400" />}
-                          </button>
-                          <button
-                            onClick={() => runScheduleNow(s.id)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/10 transition"
-                            title="Execute Immediately"
-                          >
-                            <RotateCcw className="w-4 h-4" />
+                            {s.is_active ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
                           </button>
                           <button
                             onClick={() => openEdit(s)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-white/10 transition"
-                            title="Edit Settings"
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.08)',
+                              padding: 5, borderRadius: 7, cursor: 'pointer', color: '#c084fc'
+                            }}
+                            title="แก้ไขการตั้งค่า"
                           >
-                            <Sliders className="w-4 h-4" />
+                            <Sliders size={14} />
                           </button>
                           <button
                             onClick={() => deleteSchedule(s.id)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-white/10 transition"
-                            title="Delete Schedule"
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)',
+                              padding: 5, borderRadius: 7, cursor: 'pointer', color: '#f87171'
+                            }}
+                            title="ลบงานนี้"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 size={14} />
                           </button>
                         </div>
-                      </div>
+                      </SchedHeader>
 
-                      {/* Details row */}
-                      <div className="space-y-1.5 text-xs text-slate-300 mb-4 bg-black/30 p-3 rounded-xl border border-white/[0.04]">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Frequency:</span>
-                          <strong className="text-amber-300">{intervalLabel(s.interval_unit, s.interval_value)}</strong>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Target Scope:</span>
-                          <span className="text-white font-medium">{s.scope.toUpperCase()} ({scopeCount} games)</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Boost Range:</span>
-                          <span className="text-cyan-300 font-bold">+{s.view_min}~{s.view_max} views <span className="text-slate-500 font-normal">·</span> <span className="text-rose-300">+{s.like_min}~{s.like_max} likes</span></span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Next Execution:</span>
-                          <span className="text-emerald-300 font-semibold">{fmtTimeLeft(s.next_run_at)}</span>
-                        </div>
-                      </div>
+                      {/* Schedule Parameters Box */}
+                      <SchedInfoBox>
+                        <SchedInfoRow>
+                          <span style={{ color: 'rgba(148, 163, 184, 0.7)' }}>ความถี่ (Frequency):</span>
+                          <strong style={{ color: '#fbbf24' }}>{intervalLabel(s.interval_unit, s.interval_value)}</strong>
+                        </SchedInfoRow>
+                        <SchedInfoRow>
+                          <span style={{ color: 'rgba(148, 163, 184, 0.7)' }}>เป้าหมาย (Scope):</span>
+                          <span style={{ color: '#fff', fontWeight: 600 }}>{s.scope.toUpperCase()} ({scopeCount} เกม)</span>
+                        </SchedInfoRow>
+                        <SchedInfoRow>
+                          <span style={{ color: 'rgba(148, 163, 184, 0.7)' }}>ยอดเพิ่ม / รอบ:</span>
+                          <span style={{ fontWeight: 700 }}>
+                            <span style={{ color: '#22d3ee' }}>+{s.view_min}~{s.view_max} วิว</span>
+                            <span style={{ margin: '0 4px', opacity: 0.4 }}>·</span>
+                            <span style={{ color: '#fb7185' }}>+{s.like_min}~{s.like_max} ไลก์</span>
+                          </span>
+                        </SchedInfoRow>
+                        <SchedInfoRow>
+                          <span style={{ color: 'rgba(148, 163, 184, 0.7)' }}>รอบถัดไป (Next Run):</span>
+                          <span style={{ color: '#34d399', fontWeight: 700 }}>{fmtTimeLeft(s.next_run_at)}</span>
+                        </SchedInfoRow>
+                      </SchedInfoBox>
 
-                      {/* Cumulative stats */}
-                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                        <div className="p-2 rounded-xl bg-white/[0.03] border border-white/[0.04]">
-                          <div className="text-[10px] text-slate-500 font-bold uppercase">Total Runs</div>
-                          <div className="font-extrabold text-white mt-0.5">{s.total_runs || 0}</div>
-                        </div>
-                        <div className="p-2 rounded-xl bg-cyan-950/20 border border-cyan-500/10">
-                          <div className="text-[10px] text-cyan-400 font-bold uppercase">+Views Added</div>
-                          <div className="font-extrabold text-cyan-300 mt-0.5">+{fmtNum(s.total_views_added || 0)}</div>
-                        </div>
-                        <div className="p-2 rounded-xl bg-rose-950/20 border border-rose-500/10">
-                          <div className="text-[10px] text-rose-400 font-bold uppercase">+Likes Added</div>
-                          <div className="font-extrabold text-rose-300 mt-0.5">+{fmtNum(s.total_likes_added || 0)}</div>
-                        </div>
-                      </div>
-                    </div>
+                      {/* Lifetime Statistics */}
+                      <SchedStatsRow>
+                        <SchedStatTile>
+                          <div style={{ fontSize: 9, color: 'rgba(148, 163, 184, 0.6)', fontWeight: 700, textTransform: 'uppercase' }}>
+                            Runs
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 900, color: '#fff', marginTop: 3 }}>
+                            {s.total_runs || 0}
+                          </div>
+                        </SchedStatTile>
+
+                        <SchedStatTile $color="#06b6d4">
+                          <div style={{ fontSize: 9, color: '#22d3ee', fontWeight: 700, textTransform: 'uppercase' }}>
+                            +Views
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 900, color: '#22d3ee', marginTop: 3 }}>
+                            +{fmtNum(s.total_views_added || 0)}
+                          </div>
+                        </SchedStatTile>
+
+                        <SchedStatTile $color="#f43f5e">
+                          <div style={{ fontSize: 9, color: '#fb7185', fontWeight: 700, textTransform: 'uppercase' }}>
+                            +Likes
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 900, color: '#fb7185', marginTop: 3 }}>
+                            +{fmtNum(s.total_likes_added || 0)}
+                          </div>
+                        </SchedStatTile>
+                      </SchedStatsRow>
+
+                      {/* Boost Now Button */}
+                      <BoostNowBtn
+                        $running={boostingId === s.id}
+                        disabled={!!boostingId}
+                        onClick={() => runScheduleNow(s)}
+                      >
+                        {boostingId === s.id ? (
+                          <>
+                            <RefreshCw size={14} style={{ animation: 'spin 0.8s linear infinite' }} />
+                            <span>กำลังสั่งรัน (Executing)...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={14} />
+                            <span>Boost Now (สั่งรันทันที)</span>
+                          </>
+                        )}
+                      </BoostNowBtn>
+                    </SchedCard>
                   )
                 })}
-              </div>
+              </SchedulesGrid>
             )}
           </div>
         )}
-      </div>
+      </AdminPage>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          MODAL: NEW / EDIT AUTO-BOOST SCHEDULE
-      ═══════════════════════════════════════════════════════════════════ */}
-      {showModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
-          style={{ background: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(16px)', animation: 'fadeIn 0.2s ease-out' }}
-        >
-          <div
-            className="w-full max-w-xl rounded-3xl border border-white/[0.12] shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
-            style={{
-              background: 'linear-gradient(180deg, #121829 0%, #0c101c 100%)',
-              backdropFilter: 'blur(40px)',
-              animation: 'scaleIn 0.2s ease-out',
-            }}
-          >
-            {/* Modal Header */}
-            <div
-              className="relative p-5 sm:p-6 border-b border-white/[0.08]"
-              style={{ background: 'linear-gradient(135deg, rgba(249,115,22,0.15) 0%, rgba(225,29,72,0.1) 100%)' }}
-            >
-              <button
-                onClick={() => { setShowModal(false); setEditSchedId(null) }}
-                className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition z-10"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* ═════════════════════════════════════════════════════════════════════
+          PORTALED MODALS (Attached to document.body, covers full viewport!)
+      ═════════════════════════════════════════════════════════════════════ */}
 
-              <div className="flex items-center gap-3.5">
-                <div
-                  className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-xl shrink-0"
-                  style={{ background: 'linear-gradient(135deg, #f97316 0%, #e11d48 100%)' }}
-                >
-                  <Clock className="w-6 h-6 text-white" />
+      {/* ── MODAL 1: CREATE / EDIT SCHEDULE ── */}
+      {showModal && createPortal(
+        <ModalBackdrop onClick={() => setShowModal(false)}>
+          <ModalBox onClick={e => e.stopPropagation()}>
+            <DragHandle />
+            <ModalHeaderWrap>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  background: 'linear-gradient(135deg, #f97316, #e11d48)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <Clock size={18} color="#fff" />
                 </div>
                 <div>
-                  <h3 className="text-lg sm:text-xl font-black text-white">
-                    {editSchedId ? 'Edit Auto-Boost Schedule' : 'New Auto-Boost Schedule'}
+                  <h3 style={{ fontSize: 16, fontWeight: 800, color: '#fff', margin: 0 }}>
+                    {editSchedId ? 'แก้ไข Auto-Boost Schedule' : 'สร้าง Auto-Boost Schedule ใหม่'}
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Background automated job · Continues running even when browser is closed
-                  </p>
+                  <div style={{ fontSize: 11, color: 'rgba(148, 163, 184, 0.7)', marginTop: 2 }}>
+                    ระบบรันอัตโนมัติเบื้องหลังต่อเนื่อง แม้ไม่ได้เปิดเว็บ
+                  </div>
                 </div>
               </div>
-            </div>
+              <button
+                onClick={() => setShowModal(false)}
+                style={{ background: 'none', border: 'none', color: 'rgba(148, 163, 184, 0.6)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </ModalHeaderWrap>
 
-            {/* Modal Scrollable Body */}
-            <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
-              {/* Optional Schedule Name */}
+            <ModalBodyWrap>
+              {/* Schedule Label */}
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  Schedule Label / Description (Optional)
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(148, 163, 184, 0.8)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  ชื่อหรือคำอธิบาย Schedule
                 </label>
-                <input
+                <StyledInput
                   type="text"
-                  placeholder="e.g. Daily Featured Games Auto-Growth"
+                  placeholder="เช่น: เพิ่มยอดเกมแนะนำทุก 1 ชม."
                   value={draft.label || ''}
                   onChange={e => setDraft(p => ({ ...p, label: e.target.value || null }))}
-                  className="w-full rounded-xl bg-white/[0.04] border border-white/10 hover:border-white/20 focus:border-amber-500/60 px-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none transition"
                 />
               </div>
 
-              {/* 1. Target Scope Selection */}
+              {/* 1. Target Scope */}
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-                  1. Target Games Scope
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(148, 163, 184, 0.8)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  1. ขอบเขตเกมเป้าหมาย (Target Scope)
                 </label>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                   {[
-                    { v: 'selected' as BoostScope, icon: '🎯', label: 'Selected', sub: `${selectedIds.size} games` },
-                    { v: 'category' as BoostScope, icon: '📂', label: 'By Category', sub: 'Category filter' },
-                    { v: 'all' as BoostScope, icon: '🌐', label: 'All Games', sub: `${games.length} total` },
-                  ].map(s => (
+                    { v: 'selected' as BoostScope, icon: '🎯', label: 'เกมที่เลือก', sub: `${selectedIds.size} เกม` },
+                    { v: 'category' as BoostScope, icon: '📂', label: 'ตามหมวดหมู่', sub: 'กรอง Category' },
+                    { v: 'all' as BoostScope, icon: '🌐', label: 'ทุกเกมในระบบ', sub: `${games.length} เกม` },
+                  ].map(sc => (
                     <button
-                      key={s.v}
+                      key={sc.v}
                       type="button"
-                      onClick={() => setDraft(p => ({ ...p, scope: s.v }))}
-                      className={`p-3 rounded-2xl border text-center transition-all ${draft.scope === s.v
-                        ? 'border-amber-500/60 bg-amber-500/15 shadow-md scale-[1.02]'
-                        : 'border-white/[0.08] bg-white/[0.03] hover:border-white/20'
-                        }`}
+                      onClick={() => setDraft(p => ({ ...p, scope: sc.v }))}
+                      style={{
+                        padding: '12px 8px', borderRadius: 12, cursor: 'pointer', textAlign: 'center',
+                        background: draft.scope === sc.v ? 'rgba(124, 58, 237, 0.2)' : 'rgba(255, 255, 255, 0.03)',
+                        border: `1px solid ${draft.scope === sc.v ? '#7c3aed' : 'rgba(255, 255, 255, 0.08)'}`,
+                        color: draft.scope === sc.v ? '#c084fc' : '#e2e8f0',
+                        transition: 'all 0.15s'
+                      }}
                     >
-                      <div className="text-xl mb-1">{s.icon}</div>
-                      <div className={`text-xs font-bold ${draft.scope === s.v ? 'text-amber-300' : 'text-slate-300'}`}>
-                        {s.label}
-                      </div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">{s.sub}</div>
+                      <div style={{ fontSize: 18, marginBottom: 2 }}>{sc.icon}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>{sc.label}</div>
+                      <div style={{ fontSize: 10, opacity: 0.6, marginTop: 1 }}>{sc.sub}</div>
                     </button>
                   ))}
                 </div>
 
                 {draft.scope === 'category' && (
-                  <div className="mt-3">
-                    <select
+                  <div style={{ marginTop: 8 }}>
+                    <StyledSelect
                       value={draft.category_id || ''}
                       onChange={e => setDraft(p => ({ ...p, category_id: e.target.value || null }))}
-                      className="w-full rounded-xl bg-white/[0.05] border border-white/15 px-4 py-2.5 text-xs sm:text-sm text-slate-200 focus:outline-none appearance-none cursor-pointer focus:border-amber-500/60"
+                      style={{ width: '100%' }}
                     >
-                      <option value="" className="bg-slate-900">— Select Target Category —</option>
-                      {categories.map(c => (
-                        <option key={c.id} value={c.id} className="bg-slate-900">{c.name}</option>
-                      ))}
-                    </select>
+                      <option value="">— เลือกหมวดหมู่เป้าหมาย —</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </StyledSelect>
                   </div>
                 )}
               </div>
 
               {/* 2. Boost Mode */}
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-                  2. Growth Strategy (Boost Mode)
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(148, 163, 184, 0.8)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  2. รูปแบบการเติบโต (Growth Strategy)
                 </label>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   {[
-                    { v: 'increment' as BoostMode, label: 'Natural Increments', sub: 'Adds random amount each run', icon: <TrendingUp className="w-4 h-4 text-indigo-400" /> },
-                    { v: 'target' as BoostMode, label: 'Target Milestones', sub: 'Runs until target goals met', icon: <Target className="w-4 h-4 text-emerald-400" /> },
+                    { v: 'increment' as BoostMode, label: 'Natural Increments', sub: 'สุ่มเพิ่มยอดแบบธรรมชาติทุกๆ รอบ', icon: <TrendingUp size={15} color="#06b6d4" /> },
+                    { v: 'target' as BoostMode, label: 'Target Milestones', sub: 'รันจนกว่าจะถึงยอดเป้าหมายที่ตั้งไว้', icon: <Target size={15} color="#34d399" /> },
                   ].map(m => (
                     <button
                       key={m.v}
                       type="button"
                       onClick={() => setDraft(p => ({ ...p, mode: m.v }))}
-                      className={`p-3.5 rounded-2xl border text-left flex items-start gap-2.5 transition-all ${draft.mode === m.v
-                        ? 'border-indigo-500/60 bg-indigo-500/15 scale-[1.01]'
-                        : 'border-white/[0.08] bg-white/[0.03] hover:border-white/20'
-                        }`}
+                      style={{
+                        padding: '12px 14px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+                        background: draft.mode === m.v ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                        border: `1px solid ${draft.mode === m.v ? '#06b6d4' : 'rgba(255, 255, 255, 0.08)'}`,
+                        color: draft.mode === m.v ? '#22d3ee' : '#e2e8f0',
+                        display: 'flex', alignItems: 'flex-start', gap: 8
+                      }}
                     >
-                      <div className="mt-0.5 shrink-0">{m.icon}</div>
+                      <div style={{ marginTop: 2 }}>{m.icon}</div>
                       <div>
-                        <div className={`text-xs font-bold ${draft.mode === m.v ? 'text-indigo-300' : 'text-slate-300'}`}>
-                          {m.label}
-                        </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">{m.sub}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700 }}>{m.label}</div>
+                        <div style={{ fontSize: 10, opacity: 0.6, marginTop: 1 }}>{m.sub}</div>
                       </div>
                     </button>
                   ))}
@@ -1563,401 +2222,361 @@ export default function AdminBoostMetrics() {
               </div>
 
               {/* 3. Metric Growth Rates */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 {/* Views Config */}
-                <div className="p-4 rounded-2xl border border-cyan-500/25 bg-cyan-950/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5 uppercase tracking-wide">
-                      <Eye className="w-4 h-4" /> Views / Run
+                <div style={{
+                  padding: '12px 14px', borderRadius: 14,
+                  background: 'rgba(6, 182, 212, 0.08)', border: '1px solid rgba(6, 182, 212, 0.25)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#22d3ee', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Eye size={13} /> วิว / รอบ
                     </span>
-                    <span className="text-[10px] text-cyan-500/80 font-semibold">Min ~ Max</span>
                   </div>
-                  <div className="flex items-center gap-2 mb-2.5">
-                    <input
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <StyledInput
                       type="number"
                       min="0"
                       step="10"
                       value={draft.view_min}
                       onChange={e => setDraft(p => ({ ...p, view_min: Math.max(0, parseInt(e.target.value) || 0) }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white text-center font-bold focus:outline-none focus:border-cyan-400"
+                      style={{ textAlign: 'center', fontWeight: 700, padding: '7px 8px' }}
                     />
-                    <span className="text-slate-500 font-bold">~</span>
-                    <input
+                    <span style={{ color: 'rgba(148, 163, 184, 0.5)', fontWeight: 700 }}>~</span>
+                    <StyledInput
                       type="number"
                       min="0"
                       step="10"
                       value={draft.view_max}
                       onChange={e => setDraft(p => ({ ...p, view_max: Math.max(0, parseInt(e.target.value) || 0) }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white text-center font-bold focus:outline-none focus:border-cyan-400"
+                      style={{ textAlign: 'center', fontWeight: 700, padding: '7px 8px' }}
                     />
                   </div>
-                  {/* Preset Pills */}
-                  <div className="flex gap-1 flex-wrap">
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {[
-                      { min: 10, max: 50, label: 'Low (~50)' },
-                      { min: 30, max: 150, label: 'Mid (~150)' },
-                      { min: 100, max: 500, label: 'High (~500)' },
+                      { min: 10, max: 50, label: '~50' },
+                      { min: 30, max: 150, label: '~150' },
+                      { min: 100, max: 500, label: '~500' },
                     ].map(preset => (
-                      <button
+                      <QuickPill
                         key={preset.label}
-                        type="button"
+                        $color="#06b6d4"
                         onClick={() => setDraft(p => ({ ...p, view_min: preset.min, view_max: preset.max }))}
-                        className="px-2 py-1 rounded-lg text-[10px] font-bold text-cyan-400 border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition"
                       >
                         {preset.label}
-                      </button>
+                      </QuickPill>
                     ))}
                   </div>
                 </div>
 
                 {/* Likes Config */}
-                <div className="p-4 rounded-2xl border border-rose-500/25 bg-rose-950/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5 uppercase tracking-wide">
-                      <ThumbsUp className="w-4 h-4" /> Likes / Run
+                <div style={{
+                  padding: '12px 14px', borderRadius: 14,
+                  background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.25)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#fb7185', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <ThumbsUp size={13} /> ไลก์ / รอบ
                     </span>
-                    <span className="text-[10px] text-rose-500/80 font-semibold">Min ~ Max</span>
                   </div>
-                  <div className="flex items-center gap-2 mb-2.5">
-                    <input
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <StyledInput
                       type="number"
                       min="0"
                       step="5"
                       value={draft.like_min}
                       onChange={e => setDraft(p => ({ ...p, like_min: Math.max(0, parseInt(e.target.value) || 0) }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white text-center font-bold focus:outline-none focus:border-rose-400"
+                      style={{ textAlign: 'center', fontWeight: 700, padding: '7px 8px' }}
                     />
-                    <span className="text-slate-500 font-bold">~</span>
-                    <input
+                    <span style={{ color: 'rgba(148, 163, 184, 0.5)', fontWeight: 700 }}>~</span>
+                    <StyledInput
                       type="number"
                       min="0"
                       step="5"
                       value={draft.like_max}
                       onChange={e => setDraft(p => ({ ...p, like_max: Math.max(0, parseInt(e.target.value) || 0) }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white text-center font-bold focus:outline-none focus:border-rose-400"
+                      style={{ textAlign: 'center', fontWeight: 700, padding: '7px 8px' }}
                     />
                   </div>
-                  {/* Preset Pills */}
-                  <div className="flex gap-1 flex-wrap">
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {[
-                      { min: 5, max: 20, label: 'Low (~20)' },
-                      { min: 10, max: 50, label: 'Mid (~50)' },
-                      { min: 25, max: 100, label: 'High (~100)' },
+                      { min: 5, max: 20, label: '~20' },
+                      { min: 10, max: 50, label: '~50' },
+                      { min: 25, max: 100, label: '~100' },
                     ].map(preset => (
-                      <button
+                      <QuickPill
                         key={preset.label}
-                        type="button"
+                        $color="#f43f5e"
                         onClick={() => setDraft(p => ({ ...p, like_min: preset.min, like_max: preset.max }))}
-                        className="px-2 py-1 rounded-lg text-[10px] font-bold text-rose-400 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 transition"
                       >
                         {preset.label}
-                      </button>
+                      </QuickPill>
                     ))}
                   </div>
                 </div>
               </div>
 
               {/* 4. Execution Frequency */}
-              <div className="p-4 rounded-2xl border border-white/[0.08] bg-white/[0.03]">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-                  <Calendar className="w-4 h-4 text-amber-400" />
-                  <span>4. Execution Frequency</span>
+              <div style={{
+                padding: '14px 16px', borderRadius: 14,
+                background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)'
+              }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(148, 163, 184, 0.8)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  4. ความถี่ในการรัน (Execution Frequency)
                 </label>
-                <div className="flex items-center gap-2.5 mb-3">
-                  <span className="text-xs text-slate-400 font-medium">Every</span>
-                  <input
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, color: 'rgba(148, 163, 184, 0.8)', fontWeight: 600 }}>ทุกๆ</span>
+                  <StyledInput
                     type="number"
                     min="1"
                     max="999"
                     value={draft.interval_value}
                     onChange={e => setDraft(p => ({ ...p, interval_value: Math.max(1, parseInt(e.target.value) || 1) }))}
-                    className="w-20 bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-xs sm:text-sm text-white text-center font-black focus:outline-none focus:border-amber-400"
+                    style={{ width: 60, textAlign: 'center', fontWeight: 800, padding: '7px 8px' }}
                   />
-                  <div className="grid grid-cols-4 gap-1 flex-1">
-                    {(['minute', 'hour', 'day', 'month'] as IntervalUnit[]).map(unit => (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4, flex: 1 }}>
+                    {(['minute', 'hour', 'day', 'month'] as IntervalUnit[]).map(u => (
                       <button
-                        key={unit}
+                        key={u}
                         type="button"
-                        onClick={() => setDraft(p => ({ ...p, interval_unit: unit }))}
-                        className={`py-2 rounded-xl text-xs font-bold capitalize border transition ${draft.interval_unit === unit
-                          ? 'text-amber-200 border-amber-500/60 bg-amber-500/20 shadow-sm'
-                          : 'text-slate-400 border-white/[0.08] hover:text-white hover:bg-white/[0.04]'
-                          }`}
+                        onClick={() => setDraft(p => ({ ...p, interval_unit: u }))}
+                        style={{
+                          padding: '7px 8px', borderRadius: 8, cursor: 'pointer', textTransform: 'capitalize',
+                          fontSize: 11, fontWeight: 700,
+                          background: draft.interval_unit === u ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                          border: `1px solid ${draft.interval_unit === u ? '#f59e0b' : 'rgba(255, 255, 255, 0.08)'}`,
+                          color: draft.interval_unit === u ? '#fbbf24' : '#e2e8f0',
+                        }}
                       >
-                        {unit}
+                        {u}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Frequency Quick Chips */}
-                <div className="flex gap-1.5 flex-wrap">
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {[
-                    { unit: 'minute' as IntervalUnit, val: 5, label: '5 mins' },
-                    { unit: 'minute' as IntervalUnit, val: 30, label: '30 mins' },
-                    { unit: 'hour' as IntervalUnit, val: 1, label: '1 hour' },
-                    { unit: 'hour' as IntervalUnit, val: 6, label: '6 hours' },
-                    { unit: 'day' as IntervalUnit, val: 1, label: '1 day' },
-                  ].map(item => (
+                    { unit: 'minute' as IntervalUnit, val: 5, label: '5m' },
+                    { unit: 'minute' as IntervalUnit, val: 30, label: '30m' },
+                    { unit: 'hour' as IntervalUnit, val: 1, label: '1h' },
+                    { unit: 'hour' as IntervalUnit, val: 6, label: '6h' },
+                    { unit: 'day' as IntervalUnit, val: 1, label: '1d' },
+                  ].map(preset => (
                     <button
-                      key={item.label}
+                      key={preset.label}
                       type="button"
-                      onClick={() => setDraft(p => ({ ...p, interval_unit: item.unit, interval_value: item.val }))}
-                      className={`px-3 py-1 rounded-xl text-[11px] font-bold border transition ${draft.interval_unit === item.unit && draft.interval_value === item.val
-                        ? 'text-amber-300 border-amber-500/60 bg-amber-500/20'
-                        : 'text-slate-400 border-white/10 hover:text-white'
-                        }`}
+                      onClick={() => setDraft(p => ({ ...p, interval_unit: preset.unit, interval_value: preset.val }))}
+                      style={{
+                        padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                        background: draft.interval_unit === preset.unit && draft.interval_value === preset.val
+                          ? 'rgba(245, 158, 11, 0.25)'
+                          : 'rgba(255, 255, 255, 0.04)',
+                        border: `1px solid ${draft.interval_unit === preset.unit && draft.interval_value === preset.val ? '#f59e0b' : 'rgba(255, 255, 255, 0.08)'}`,
+                        color: draft.interval_unit === preset.unit && draft.interval_value === preset.val ? '#fbbf24' : 'rgba(148, 163, 184, 0.8)'
+                      }}
                     >
-                      {item.label}
+                      {preset.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* 5. Live Summary Preview Card */}
-              <div className="p-4 rounded-2xl border border-indigo-500/30 bg-indigo-950/30 text-xs space-y-1.5 leading-relaxed">
-                <div className="flex items-center gap-1.5 font-bold text-indigo-300 mb-2">
-                  <Sparkles className="w-4 h-4 text-indigo-400" />
-                  <span>Execution Summary</span>
+              {/* 5. Summary Preview */}
+              <div style={{
+                padding: '12px 14px', borderRadius: 12,
+                background: 'rgba(124, 58, 237, 0.12)', border: '1px solid rgba(124, 58, 237, 0.3)',
+                fontSize: 12, lineHeight: 1.5
+              }}>
+                <div style={{ fontWeight: 800, color: '#c084fc', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Sparkles size={13} /> สรุปการทำงาน (Summary)
                 </div>
-                <div className="text-slate-300">
-                  • Frequency: <strong className="text-white">{intervalLabel(draft.interval_unit, draft.interval_value)}</strong>
+                <div style={{ color: '#e2e8f0' }}>
+                  • ความถี่: <strong style={{ color: '#fbbf24' }}>{intervalLabel(draft.interval_unit, draft.interval_value)}</strong>
                 </div>
-                <div className="text-slate-300">
-                  • Target Scope: <strong className="text-white">
-                    {draft.scope === 'all'
-                      ? `All ${games.length} games`
-                      : draft.scope === 'category'
-                        ? 'Games in specified category'
-                        : `${selectedIds.size} selected games`}
-                  </strong>
+                <div style={{ color: '#e2e8f0' }}>
+                  • เป้าหมาย: <strong>{draft.scope === 'all' ? `ทั้งหมด ${games.length} เกม` : draft.scope === 'category' ? 'เกมในหมวดหมู่ที่ระบุ' : `${selectedIds.size} เกมที่เลือก`}</strong>
                 </div>
-                <div className="text-slate-300">
-                  • Added per run: <strong className="text-cyan-300">+{draft.view_min}~{draft.view_max} views</strong> and <strong className="text-rose-300">+{draft.like_min}~{draft.like_max} likes</strong>
+                <div style={{ color: '#e2e8f0' }}>
+                  • ยอดเพิ่ม/รอบ: <strong style={{ color: '#22d3ee' }}>+{draft.view_min}~{draft.view_max} วิว</strong> · <strong style={{ color: '#fb7185' }}>+{draft.like_min}~{draft.like_max} ไลก์</strong>
                 </div>
               </div>
-            </div>
+            </ModalBodyWrap>
 
-            {/* Modal Footer */}
-            <div className="p-5 border-t border-white/[0.08] bg-black/40 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => { setShowModal(false); setEditSchedId(null) }}
-                className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white hover:bg-white/[0.05] transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
+            <ModalFooterWrap>
+              <SecondaryBtn onClick={() => setShowModal(false)} style={{ padding: '9px 16px', fontSize: 13 }}>
+                ยกเลิก
+              </SecondaryBtn>
+              <PrimaryBtn
                 disabled={savingSched}
                 onClick={saveSchedule}
-                className="px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-white shadow-xl flex items-center gap-2 transition hover:scale-105 active:scale-95 disabled:opacity-50"
                 style={{
-                  background: 'linear-gradient(135deg, #f97316 0%, #e11d48 100%)',
-                  boxShadow: '0 8px 24px rgba(225,29,72,0.3)',
+                  padding: '9px 20px', fontSize: 13,
+                  background: 'linear-gradient(135deg, #f97316, #e11d48)',
+                  boxShadow: '0 4px 18px rgba(225, 29, 72, 0.4)'
                 }}
               >
-                {savingSched ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                <span>{editSchedId ? 'Update Schedule' : 'Start Auto-Boost'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
+                {savingSched ? <RefreshCw size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Zap size={14} />}
+                <span>{editSchedId ? 'บันทึกแก้ไข' : 'เริ่มรัน Auto-Boost'}</span>
+              </PrimaryBtn>
+            </ModalFooterWrap>
+          </ModalBox>
+        </ModalBackdrop>,
+        document.body
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          MODAL: FINE-TUNE PRECISION ADJUSTER
-      ═══════════════════════════════════════════════════════════════════ */}
-      {fineGame && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto"
-          style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(16px)' }}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl border border-white/[0.12] p-6 shadow-2xl relative"
-            style={{ background: 'linear-gradient(180deg, #121829 0%, #0c101c 100%)', backdropFilter: 'blur(40px)' }}
-          >
-            <button
-              onClick={() => setFineGame(null)}
-              className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 text-white shrink-0">
-                <Sliders className="w-5 h-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-bold text-white text-base line-clamp-1">{fineGame.title}</h3>
-                <p className="text-xs text-slate-400">Fine-tune engagement counts</p>
-              </div>
-            </div>
-
-            {/* Mode Toggle */}
-            <div className="grid grid-cols-2 gap-2 mb-4 p-1 rounded-2xl border border-white/[0.08] bg-black/40">
-              {(['increment', 'overwrite'] as const).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setFineMode(m)}
-                  className={`py-2 rounded-xl text-xs font-bold transition ${fineMode === m ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                    }`}
-                >
-                  {m === 'increment' ? '➕ Add Delta' : '🎯 Set Exact'}
-                </button>
-              ))}
-            </div>
-
-            {/* Inputs */}
-            <div className="space-y-3 mb-5">
-              <div className="p-3.5 rounded-2xl border border-cyan-500/20 bg-cyan-950/20">
-                <div className="flex justify-between items-center text-xs mb-1.5">
-                  <span className="font-bold text-cyan-400 flex items-center gap-1">
-                    <Eye className="w-3.5 h-3.5" /> Views {fineMode === 'increment' ? 'to Add' : 'Target'}
-                  </span>
-                  <span className="text-slate-400 font-mono">Current: {fmtNum(fineGame.currentViews)}</span>
+      {/* ── MODAL 2: FINE-TUNE PRECISION ADJUSTER ── */}
+      {fineGame && createPortal(
+        <ModalBackdrop onClick={() => setFineGame(null)}>
+          <ModalBox $maxWidth="440px" onClick={e => e.stopPropagation()}>
+            <DragHandle />
+            <ModalHeaderWrap>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 34, height: 34, borderRadius: 10,
+                  background: 'linear-gradient(135deg, #06b6d4, #7c3aed)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <Sliders size={16} color="#fff" />
                 </div>
-                <input
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: '#fff', margin: 0, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {fineGame.title}
+                  </h3>
+                  <div style={{ fontSize: 11, color: 'rgba(148, 163, 184, 0.7)' }}>ปรับแต่งสถิติเฉพาะเกมนี้</div>
+                </div>
+              </div>
+              <button onClick={() => setFineGame(null)} style={{ background: 'none', border: 'none', color: 'rgba(148, 163, 184, 0.6)', cursor: 'pointer' }}>
+                <X size={16} />
+              </button>
+            </ModalHeaderWrap>
+
+            <ModalBodyWrap style={{ gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, background: 'rgba(10, 10, 20, 0.6)', padding: 3, borderRadius: 10 }}>
+                {(['increment', 'overwrite'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setFineMode(m)}
+                    style={{
+                      padding: '7px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                      background: fineMode === m ? '#7c3aed' : 'transparent',
+                      border: 'none', color: fineMode === m ? '#fff' : 'rgba(148, 163, 184, 0.8)',
+                    }}
+                  >
+                    {m === 'increment' ? '➕ เพิ่มยอด (Delta)' : '🎯 กำหนดยอดตรงๆ'}
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#22d3ee', marginBottom: 5 }}>
+                  ยอดวิว (Views) {fineMode === 'increment' ? 'ที่ต้องการเพิ่ม' : 'เป้าหมาย'}
+                </label>
+                <StyledInput
                   type="number"
                   min="0"
                   value={fineViews}
                   onChange={e => setFineViews(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-400 font-bold"
+                  style={{ fontWeight: 800, fontSize: 14 }}
                 />
               </div>
 
-              <div className="p-3.5 rounded-2xl border border-rose-500/20 bg-rose-950/20">
-                <div className="flex justify-between items-center text-xs mb-1.5">
-                  <span className="font-bold text-rose-400 flex items-center gap-1">
-                    <ThumbsUp className="w-3.5 h-3.5" /> Likes {fineMode === 'increment' ? 'to Add' : 'Target'}
-                  </span>
-                  <span className="text-slate-400 font-mono">Current: {fmtNum(fineGame.currentLikes)}</span>
-                </div>
-                <input
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#fb7185', marginBottom: 5 }}>
+                  ยอดไลก์ (Likes) {fineMode === 'increment' ? 'ที่ต้องการเพิ่ม' : 'เป้าหมาย'}
+                </label>
+                <StyledInput
                   type="number"
                   min="0"
                   value={fineLikes}
                   onChange={e => setFineLikes(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-400 font-bold"
+                  style={{ fontWeight: 800, fontSize: 14 }}
                 />
               </div>
-            </div>
 
-            {/* Preview result */}
-            <div className="p-3.5 rounded-2xl border border-white/[0.08] bg-black/30 flex items-center justify-between text-xs mb-5">
-              <span className="text-slate-400">Final Metric Result:</span>
-              <div className="flex items-center gap-3 font-bold">
-                <span className="text-cyan-300">
-                  {fmtNum(fineMode === 'increment' ? fineGame.currentViews + fineViews : fineViews)} 👁
-                </span>
-                <span className="text-rose-300">
-                  {fmtNum(fineMode === 'increment' ? fineGame.currentLikes + fineLikes : fineLikes)} ❤️
-                </span>
-              </div>
-            </div>
-
-            {/* Buttons */}
-            <div className="flex gap-2.5">
-              <button
-                onClick={() => setFineGame(null)}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={applyFine}
-                className="flex-[2] py-2.5 rounded-xl text-xs font-bold text-white shadow-lg transition hover:scale-105 active:scale-95"
-                style={{ background: 'linear-gradient(135deg, #06b6d4 0%, #6366f1 100%)' }}
-              >
-                Apply Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          MODAL: SQL SETUP & HELP
-      ═══════════════════════════════════════════════════════════════════ */}
-      {showSqlModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto"
-          style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(16px)' }}
-        >
-          <div
-            className="w-full max-w-lg rounded-3xl border border-purple-500/30 p-6 shadow-2xl relative"
-            style={{ background: 'linear-gradient(180deg, #16122a 0%, #0d0a1c 100%)' }}
-          >
-            <button
-              onClick={() => setShowSqlModal(false)}
-              className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3.5 mb-4">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-purple-500/20 border border-purple-500/30 text-purple-300 shrink-0">
-                <Database className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-white text-lg">Database Setup Guide</h3>
-                <p className="text-xs text-purple-300/80">Configure Supabase for Background Jobs</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-300 leading-relaxed mb-6">
-              <p>
-                To enable automatic persistent boost schedules that run on the Supabase server even when the browser is closed:
-              </p>
-              <div className="p-3.5 rounded-2xl bg-black/40 border border-white/[0.08] space-y-2">
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-purple-400">Step 1:</span>
-                  <span>Run <code className="text-purple-200 bg-purple-950/60 px-1.5 py-0.5 rounded">src/lib/boost_schedules_schema.sql</code> in the Supabase SQL Editor.</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-purple-400">Step 2:</span>
-                  <span>Run <code className="text-purple-200 bg-purple-950/60 px-1.5 py-0.5 rounded">src/lib/setup_pg_cron.sql</code> to schedule the 1-minute automated cron job.</span>
+              <div style={{
+                padding: '10px 14px', borderRadius: 10, background: 'rgba(10, 10, 20, 0.5)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12
+              }}>
+                <span style={{ color: 'rgba(148, 163, 184, 0.8)' }}>ผลลัพธ์:</span>
+                <div style={{ fontWeight: 800, display: 'flex', gap: 8 }}>
+                  <span style={{ color: '#22d3ee' }}>
+                    {fmtNum(fineMode === 'increment' ? fineGame.currentViews + fineViews : fineViews)} 👁
+                  </span>
+                  <span style={{ color: '#fb7185' }}>
+                    {fmtNum(fineMode === 'increment' ? fineGame.currentLikes + fineLikes : fineLikes)} ❤️
+                  </span>
                 </div>
               </div>
-              <p className="text-slate-400 text-[11px]">
-                Note: Even without pg_cron, active schedules will still execute whenever an admin opens this dashboard.
-              </p>
-            </div>
+            </ModalBodyWrap>
 
-            <div className="flex gap-3">
-              <button
-                onClick={copySqlFiles}
-                className="flex-1 py-3 rounded-xl text-xs font-bold text-white border border-purple-500/40 bg-purple-600/30 hover:bg-purple-600/40 transition flex items-center justify-center gap-2"
-              >
-                {copiedSql ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy SQL Instructions'}</span>
-              </button>
-              <button
-                onClick={() => setShowSqlModal(false)}
-                className="px-5 py-3 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-white/5 transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalFooterWrap>
+              <SecondaryBtn onClick={() => setFineGame(null)} style={{ padding: '8px 14px' }}>
+                ยกเลิก
+              </SecondaryBtn>
+              <PrimaryBtn onClick={applyFine} style={{ padding: '8px 18px', background: 'linear-gradient(135deg, #06b6d4, #7c3aed)' }}>
+                บันทึก
+              </PrimaryBtn>
+            </ModalFooterWrap>
+          </ModalBox>
+        </ModalBackdrop>,
+        document.body
       )}
 
-      {/* Animation Styles */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes scaleIn {
-          from { opacity: 0; transform: scale(0.96); }
-          to { opacity: 1; transform: scale(1); }
-        }
-        @keyframes slideInRight {
-          from { opacity: 0; transform: translateX(20px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
-    </div>
+      {/* ── MODAL 3: SQL DATABASE SETUP ── */}
+      {showSqlModal && createPortal(
+        <ModalBackdrop onClick={() => setShowSqlModal(false)}>
+          <ModalBox $maxWidth="500px" onClick={e => e.stopPropagation()}>
+            <DragHandle />
+            <ModalHeaderWrap>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  background: 'rgba(124, 58, 237, 0.2)', border: '1px solid rgba(124, 58, 237, 0.4)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c084fc'
+                }}>
+                  <Database size={18} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 800, color: '#fff', margin: 0 }}>คู่มือติดตั้งฐานข้อมูล</h3>
+                  <div style={{ fontSize: 11, color: 'rgba(148, 163, 184, 0.7)' }}>ตั้งค่า Supabase Cron & Schemas</div>
+                </div>
+              </div>
+              <button onClick={() => setShowSqlModal(false)} style={{ background: 'none', border: 'none', color: 'rgba(148, 163, 184, 0.6)', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </ModalHeaderWrap>
+
+            <ModalBodyWrap style={{ fontSize: 12, lineHeight: 1.6, color: '#e2e8f0', gap: 12 }}>
+              <p>หากต้องการให้ระบบรันอัตโนมัติบน Supabase Server (pg_cron) ทำตามขั้นตอนนี้:</p>
+              <div style={{
+                background: 'rgba(10, 10, 20, 0.6)', padding: '12px 14px', borderRadius: 12,
+                border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: 8
+              }}>
+                <div>
+                  <strong style={{ color: '#c084fc' }}>ขั้นตอนที่ 1:</strong> รันคำสั่งจากไฟล์ <code style={{ color: '#22d3ee', background: 'rgba(6, 182, 212, 0.15)', padding: '2px 5px', borderRadius: 4 }}>src/lib/boost_schedules_schema.sql</code> ใน Supabase SQL Editor
+                </div>
+                <div>
+                  <strong style={{ color: '#c084fc' }}>ขั้นตอนที่ 2:</strong> รันคำสั่งจากไฟล์ <code style={{ color: '#22d3ee', background: 'rgba(6, 182, 212, 0.15)', padding: '2px 5px', borderRadius: 4 }}>src/lib/setup_pg_cron.sql</code> เพื่อเปิดใช้งาน Cron รันทุก 1 นาที
+                </div>
+              </div>
+              <p style={{ fontSize: 11, color: 'rgba(148, 163, 184, 0.6)' }}>
+                *หมายเหตุ: แม้ไม่ได้เปิด pg_cron ระบบ Client-Side Auto-Boost จะคอยตรวจสอบและรันให้อัตโนมัติทุกๆ 30 วินาทีขณะเปิดหน้านี้ไว้
+              </p>
+            </ModalBodyWrap>
+
+            <ModalFooterWrap>
+              <SecondaryBtn onClick={copySqlFiles} style={{ padding: '8px 14px' }}>
+                {copiedSql ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
+                <span>{copiedSql ? 'คัดลอกแล้ว!' : 'คัดลอกคำแนะนำ SQL'}</span>
+              </SecondaryBtn>
+              <PrimaryBtn onClick={() => setShowSqlModal(false)} style={{ padding: '8px 18px' }}>
+                ปิด
+              </PrimaryBtn>
+            </ModalFooterWrap>
+          </ModalBox>
+        </ModalBackdrop>,
+        document.body
+      )}
+    </>
   )
 }
