@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import styled, { keyframes, css } from 'styled-components'
 import { MessageSquare, Send, RefreshCw, Trash2, Clock, Paperclip, File, Mic, Square, X, Copy, Reply, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
+import { getSupportedAudioMimeType, stopMediaStreamTracks } from '../../../lib/audioUtils'
 
 // ── Types ─────────────────────────────────────────────────────────
 interface SupportSession {
@@ -295,8 +296,148 @@ export default function AdminSupport() {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
+
+  // Clean up all audio tracks, recorder instances, and timers safely
+  const cleanupAudioRecording = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    if (mediaRecorderRef.current) {
+      try {
+        mediaRecorderRef.current.ondataavailable = null
+        mediaRecorderRef.current.onstop = null
+        mediaRecorderRef.current.onerror = null
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop()
+        }
+      } catch (err) {
+        console.warn('Error stopping mediaRecorder during cleanup:', err)
+      }
+      mediaRecorderRef.current = null
+    }
+
+    if (mediaStreamRef.current) {
+      stopMediaStreamTracks(mediaStreamRef.current)
+      mediaStreamRef.current = null
+    }
+
+    audioChunksRef.current = []
+    setIsRecording(false)
+    setRecordingTime(0)
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    setIsRecording(false)
+
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop()
+      } catch (err) {
+        console.warn('Graceful recorder stop failed, forcing cleanup:', err)
+        cleanupAudioRecording()
+      }
+    } else {
+      cleanupAudioRecording()
+    }
+  }, [cleanupAudioRecording])
+
+  const startRecording = useCallback(async () => {
+    if (attachments.length >= 6) {
+      alert('แนบได้สูงสุด 6 ไฟล์')
+      return
+    }
+
+    // 1. Force release any lingering stream/recorder to prevent audio session locks on mobile
+    cleanupAudioRecording()
+
+    try {
+      // 2. Request a fresh stream from browser
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+
+      const mimeType = getSupportedAudioMimeType()
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+      audioChunksRef.current = []
+      setRecordingTime(0)
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        try {
+          if (audioChunksRef.current.length > 0) {
+            const actualMime = recorder.mimeType || mimeType || 'audio/webm'
+            const audioBlob = new Blob(audioChunksRef.current, { type: actualMime })
+            if (audioBlob.size > 0) {
+              const url = URL.createObjectURL(audioBlob)
+              setAttachments(prev => [...prev, {
+                id: Math.random().toString(36).slice(2, 11),
+                blob: audioBlob,
+                url,
+                type: 'audio'
+              }])
+            }
+          }
+        } catch (err) {
+          console.error('Error assembling audio blob:', err)
+        } finally {
+          // Explicitly release all media stream tracks on stop
+          if (mediaStreamRef.current) {
+            stopMediaStreamTracks(mediaStreamRef.current)
+            mediaStreamRef.current = null
+          }
+          stopMediaStreamTracks(stream)
+          mediaRecorderRef.current = null
+          audioChunksRef.current = []
+        }
+      }
+
+      recorder.onerror = (e) => {
+        console.error('MediaRecorder error:', e)
+        cleanupAudioRecording()
+      }
+
+      recorder.start()
+      setIsRecording(true)
+      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
+    } catch (e: any) {
+      cleanupAudioRecording()
+      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+        alert('ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณาอนุญาตการเข้าถึงไมโครโฟนในเบราว์เซอร์')
+      } else {
+        alert('ไม่สามารถเปิดใช้งานไมโครโฟนได้: ' + (e.message || 'อุปกรณ์ไม่พร้อมใช้งาน'))
+      }
+    }
+  }, [attachments.length, cleanupAudioRecording])
+
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      startRecording()
+    }
+  }, [isRecording, stopRecording, startRecording])
+
+  // Cleanup audio recording on unmount
+  useEffect(() => {
+    return () => {
+      cleanupAudioRecording()
+    }
+  }, [cleanupAudioRecording])
 
   // ── Fetch sessions ───────────────────────────────────────────────
   const fetchSessions = async () => {
@@ -333,6 +474,7 @@ export default function AdminSupport() {
 
   // ── Open session ─────────────────────────────────────────────────
   const openSession = async (session: SupportSession) => {
+    cleanupAudioRecording()
     setSelected(session)
     setReplyInput('')
 
@@ -360,6 +502,7 @@ export default function AdminSupport() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
+
   // ── Send reply ───────────────────────────────────────────────────
   const removeAttachment = (id: string) => {
     setAttachments(prev => {
@@ -367,43 +510,6 @@ export default function AdminSupport() {
       if (att) URL.revokeObjectURL(att.url)
       return prev.filter(a => a.id !== id)
     })
-  }
-
-  const toggleRecording = async () => {
-    if (isRecording) {
-      if (mediaRecorderRef.current) mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      if (timerRef.current) clearInterval(timerRef.current)
-    } else {
-      if (attachments.length >= 6) { alert('แนบได้สูงสุด 6 ไฟล์'); return }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        mediaRecorderRef.current = new MediaRecorder(stream)
-        audioChunksRef.current = []
-        setRecordingTime(0)
-
-        mediaRecorderRef.current.ondataavailable = (e) => {
-          if (e.data.size > 0) audioChunksRef.current.push(e.data)
-        }
-        mediaRecorderRef.current.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-          const url = URL.createObjectURL(audioBlob)
-          setAttachments(prev => [...prev, {
-            id: Math.random().toString(36).slice(2, 11),
-            blob: audioBlob,
-            url,
-            type: 'audio'
-          }])
-          stream.getTracks().forEach(track => track.stop())
-        }
-
-        mediaRecorderRef.current.start()
-        setIsRecording(true)
-        timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
-      } catch (e) {
-        alert('ไม่สามารถเข้าถึงไมโครโฟนได้')
-      }
-    }
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -492,7 +598,10 @@ export default function AdminSupport() {
 
   const sendReply = async () => {
     const rawContent = replyInput.trim()
-    if (!selected || (!rawContent && attachments.length === 0) || sending) return
+    if (!selected || (!rawContent && attachments.length === 0 && !isRecording) || sending) return
+    if (isRecording) {
+      stopRecording()
+    }
     setReplyInput('')
     setSending(true)
 
@@ -515,13 +624,15 @@ export default function AdminSupport() {
         uploadFile = att.blob
       }
       if (!uploadFile) continue
-      const uploadName = att.file?.name ?? `voice_${Date.now()}.webm`
+      const isAudio = att.type === 'audio'
+      const ext = att.blob?.type?.includes('mp4') || att.blob?.type?.includes('aac') ? 'mp4' : (att.file?.name?.split('.').pop() || 'webm')
+      const uploadName = att.file?.name ?? `voice_${Date.now()}.${ext}`
 
       const fileExt = uploadName.split('.').pop()
       const fileName = `${selected.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
 
       const { error } = await supabase.storage.from('chat_attachments').upload(fileName, uploadFile, {
-        contentType: att.type === 'audio' ? 'audio/webm' : (uploadFile as any).type
+        contentType: isAudio ? (att.blob?.type || 'audio/webm') : (uploadFile as any).type
       })
       if (error) { alert('อัปโหลดไฟล์ไม่สำเร็จ'); continue }
 

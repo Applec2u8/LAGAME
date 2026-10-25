@@ -7,6 +7,7 @@ import type { ChatMessage } from '../../lib/chatService'
 import { getActiveModelInfo } from '../../lib/aiProvider'
 import { detectPlatform } from '../../lib/analytics'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
+import { getSupportedAudioMimeType, stopMediaStreamTracks } from '../../lib/audioUtils'
 
 // ── Keyframes ─────────────────────────────────────────────────────
 const slideUp = keyframes`from { opacity: 0; transform: translateY(24px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); }`
@@ -513,6 +514,7 @@ export default function ChatBot() {
   const [isSupportRecording, setIsSupportRecording] = useState(false)
   const [supportRecordingTime, setSupportRecordingTime] = useState(0)
   const supportMediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const supportMediaStreamRef = useRef<MediaStream | null>(null)
   const supportAudioChunksRef = useRef<Blob[]>([])
   const supportTimerRef = useRef<number | null>(null)
 
@@ -697,8 +699,11 @@ export default function ChatBot() {
   const sendSupportMessage = async (textParam?: string | React.MouseEvent | React.FormEvent) => {
     const isText = typeof textParam === 'string'
     const rawContent = isText ? (textParam as string).trim() : supportInput.trim()
-    if (!rawContent && supportAttachments.length === 0) return
+    if (!rawContent && supportAttachments.length === 0 && !isSupportRecording) return
     if (supportSending) return
+    if (isSupportRecording) {
+      stopSupportRecording()
+    }
     if (supportTextRef.current) supportTextRef.current.style.height = 'auto'
 
     let content = rawContent
@@ -742,13 +747,15 @@ export default function ChatBot() {
         uploadFile = att.blob
       }
       if (!uploadFile) continue
-      const uploadName = att.file?.name ?? `voice_${Date.now()}.webm`
+      const isAudio = att.type === 'audio'
+      const ext = att.blob?.type?.includes('mp4') || att.blob?.type?.includes('aac') ? 'mp4' : (att.file?.name?.split('.').pop() || 'webm')
+      const uploadName = att.file?.name ?? `voice_${Date.now()}.${ext}`
 
       const fileExt = uploadName.split('.').pop()
       const fileName = `${supportSessionId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
 
       const { error } = await supabase.storage.from('chat_attachments').upload(fileName, uploadFile, {
-        contentType: att.type === 'audio' ? 'audio/webm' : (uploadFile as any).type
+        contentType: isAudio ? (att.blob?.type || 'audio/webm') : (uploadFile as any).type
       })
       if (error) { alert(t('chat.upload_failed')); continue }
       const { data: urlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName)
@@ -836,42 +843,137 @@ export default function ChatBot() {
     })
   }
 
-  const toggleSupportRecording = async () => {
-    if (isSupportRecording) {
-      if (supportMediaRecorderRef.current) supportMediaRecorderRef.current.stop()
-      setIsSupportRecording(false)
-      if (supportTimerRef.current) clearInterval(supportTimerRef.current)
-    } else {
-      if (supportAttachments.length >= 6) { alert('Maximum 6 attachments per message.'); return }
+  // Clean up all support audio tracks, recorder instances, and timers safely
+  const cleanupSupportRecording = useCallback(() => {
+    if (supportTimerRef.current) {
+      clearInterval(supportTimerRef.current)
+      supportTimerRef.current = null
+    }
+
+    if (supportMediaRecorderRef.current) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        supportMediaRecorderRef.current = new MediaRecorder(stream)
-        supportAudioChunksRef.current = []
-        setSupportRecordingTime(0)
-
-        supportMediaRecorderRef.current.ondataavailable = (e) => {
-          if (e.data.size > 0) supportAudioChunksRef.current.push(e.data)
+        supportMediaRecorderRef.current.ondataavailable = null
+        supportMediaRecorderRef.current.onstop = null
+        supportMediaRecorderRef.current.onerror = null
+        if (supportMediaRecorderRef.current.state !== 'inactive') {
+          supportMediaRecorderRef.current.stop()
         }
-        supportMediaRecorderRef.current.onstop = () => {
-          const audioBlob = new Blob(supportAudioChunksRef.current, { type: 'audio/webm' })
-          const url = URL.createObjectURL(audioBlob)
-          setSupportAttachments(prev => [...prev, {
-            id: Math.random().toString(36).slice(2, 11),
-            blob: audioBlob,
-            url,
-            type: 'audio'
-          }])
-          stream.getTracks().forEach(track => track.stop())
-        }
+      } catch (err) {
+        console.warn('Error stopping support mediaRecorder during cleanup:', err)
+      }
+      supportMediaRecorderRef.current = null
+    }
 
-        supportMediaRecorderRef.current.start()
-        setIsSupportRecording(true)
-        supportTimerRef.current = window.setInterval(() => setSupportRecordingTime(prev => prev + 1), 1000)
-      } catch (e) {
-        alert('Microphone access denied or not available.')
+    if (supportMediaStreamRef.current) {
+      stopMediaStreamTracks(supportMediaStreamRef.current)
+      supportMediaStreamRef.current = null
+    }
+
+    supportAudioChunksRef.current = []
+    setIsSupportRecording(false)
+    setSupportRecordingTime(0)
+  }, [])
+
+  const stopSupportRecording = useCallback(() => {
+    if (supportTimerRef.current) {
+      clearInterval(supportTimerRef.current)
+      supportTimerRef.current = null
+    }
+    setIsSupportRecording(false)
+
+    const recorder = supportMediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.stop()
+      } catch (err) {
+        console.warn('Graceful support recorder stop failed, forcing cleanup:', err)
+        cleanupSupportRecording()
+      }
+    } else {
+      cleanupSupportRecording()
+    }
+  }, [cleanupSupportRecording])
+
+  const startSupportRecording = useCallback(async () => {
+    if (supportAttachments.length >= MAX_ATTACHMENTS) {
+      alert(`Maximum ${MAX_ATTACHMENTS} attachments per message.`)
+      return
+    }
+
+    // 1. Force release any lingering stream/recorder to prevent audio session locks on mobile
+    cleanupSupportRecording()
+
+    try {
+      // 2. Request a fresh stream from browser
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      supportMediaStreamRef.current = stream
+
+      const mimeType = getSupportedAudioMimeType()
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      supportMediaRecorderRef.current = recorder
+      supportAudioChunksRef.current = []
+      setSupportRecordingTime(0)
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          supportAudioChunksRef.current.push(e.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        try {
+          if (supportAudioChunksRef.current.length > 0) {
+            const actualMime = recorder.mimeType || mimeType || 'audio/webm'
+            const audioBlob = new Blob(supportAudioChunksRef.current, { type: actualMime })
+            if (audioBlob.size > 0) {
+              const url = URL.createObjectURL(audioBlob)
+              setSupportAttachments(prev => [...prev, {
+                id: Math.random().toString(36).slice(2, 11),
+                blob: audioBlob,
+                url,
+                type: 'audio'
+              }])
+            }
+          }
+        } catch (err) {
+          console.error('Error assembling support audio blob:', err)
+        } finally {
+          // Explicitly release all media stream tracks on stop
+          if (supportMediaStreamRef.current) {
+            stopMediaStreamTracks(supportMediaStreamRef.current)
+            supportMediaStreamRef.current = null
+          }
+          stopMediaStreamTracks(stream)
+          supportMediaRecorderRef.current = null
+          supportAudioChunksRef.current = []
+        }
+      }
+
+      recorder.onerror = (e) => {
+        console.error('Support MediaRecorder error:', e)
+        cleanupSupportRecording()
+      }
+
+      recorder.start()
+      setIsSupportRecording(true)
+      supportTimerRef.current = window.setInterval(() => setSupportRecordingTime(prev => prev + 1), 1000)
+    } catch (e: any) {
+      cleanupSupportRecording()
+      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+        alert('Microphone access denied. Please allow microphone permissions in your browser.')
+      } else {
+        alert('Could not access microphone: ' + (e.message || 'Device unavailable'))
       }
     }
-  }
+  }, [supportAttachments.length, cleanupSupportRecording])
+
+  const toggleSupportRecording = useCallback(() => {
+    if (isSupportRecording) {
+      stopSupportRecording()
+    } else {
+      startSupportRecording()
+    }
+  }, [isSupportRecording, stopSupportRecording, startSupportRecording])
 
   const deleteSupportMessage = async (id: string) => {
     if (!confirm(t('chat.delete_confirm'))) return
@@ -1009,31 +1111,82 @@ export default function ChatBot() {
     }
   }
 
-  const toggleRecording = () => {
+  // Clean up speech recognition instance and timer safely
+  const cleanupAiSpeechRecognition = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current
+      rec.onresult = null
+      rec.onerror = null
+      rec.onend = null
+      try {
+        rec.abort()
+      } catch (e) {
+        try { rec.stop() } catch {}
+      }
+      recognitionRef.current = null
+    }
+
+    setIsRecording(false)
+    setRecordingTime(0)
+  }, [])
+
+  const stopAiSpeechRecognition = useCallback((saveTranscript = true) => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    setIsRecording(false)
+
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current
+      rec.onresult = null
+      rec.onerror = null
+      rec.onend = null
+      try {
+        rec.abort()
+      } catch (e) {
+        try { rec.stop() } catch {}
+      }
+      recognitionRef.current = null
+    }
+
+    if (saveTranscript && speechTranscriptRef.current) {
+      const finalVal = speechTranscriptRef.current.trim()
+      if (finalVal) {
+        setAiInput(finalVal)
+        if (aiTextRef.current) {
+          aiTextRef.current.value = finalVal
+          aiTextRef.current.style.height = 'auto'
+          aiTextRef.current.style.height = Math.min(aiTextRef.current.scrollHeight, 200) + 'px'
+        }
+      }
+    }
+
+    setTimeout(() => {
+      if (aiTextRef.current) {
+        aiTextRef.current.focus()
+        const len = aiTextRef.current.value.length
+        aiTextRef.current.setSelectionRange(len, len)
+      }
+    }, 60)
+  }, [])
+
+  const startAiSpeechRecognition = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRecognition) {
       alert(t('chat.speech_unsupported') || 'Speech Recognition is not supported in this browser. Please use Chrome.')
       return
     }
 
-    if (isRecording) {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop() } catch {}
-      }
-      setIsRecording(false)
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-      // Programmatically restore focus and place cursor at end on mobile / desktop
-      setTimeout(() => {
-        if (aiTextRef.current) {
-          aiTextRef.current.focus()
-          const len = aiTextRef.current.value.length
-          aiTextRef.current.setSelectionRange(len, len)
-        }
-      }, 60)
-    } else {
+    // Always clean up prior recognition or audio stream instances before starting
+    cleanupAiSpeechRecognition()
+
+    try {
       const recognition = new SpeechRecognition()
       recognition.continuous = true
       recognition.interimResults = true
@@ -1044,30 +1197,6 @@ export default function ChatBot() {
         initialTranscript += ' '
       }
       speechTranscriptRef.current = initialTranscript
-
-      const finishAndFocus = () => {
-        setIsRecording(false)
-        if (timerRef.current) {
-          clearInterval(timerRef.current)
-          timerRef.current = null
-        }
-        if (speechTranscriptRef.current) {
-          const finalVal = speechTranscriptRef.current.trim()
-          setAiInput(finalVal)
-          if (aiTextRef.current) {
-            aiTextRef.current.value = finalVal
-            aiTextRef.current.style.height = 'auto'
-            aiTextRef.current.style.height = Math.min(aiTextRef.current.scrollHeight, 200) + 'px'
-          }
-        }
-        setTimeout(() => {
-          if (aiTextRef.current) {
-            aiTextRef.current.focus()
-            const len = aiTextRef.current.value.length
-            aiTextRef.current.setSelectionRange(len, len)
-          }
-        }, 60)
-      }
 
       recognition.onresult = (e: any) => {
         let interimTranscript = ''
@@ -1098,29 +1227,42 @@ export default function ChatBot() {
       }
 
       recognition.onerror = (e: any) => {
-        console.error('Speech recognition error', e.error)
-        finishAndFocus()
-        if (e.error === 'not-allowed') alert('Microphone access denied.')
+        console.warn('Speech recognition error:', e.error)
+        stopAiSpeechRecognition(true)
+        if (e.error === 'not-allowed') {
+          alert('Microphone access denied. Please allow microphone permissions in your browser.')
+        }
       }
 
       recognition.onend = () => {
-        finishAndFocus()
+        stopAiSpeechRecognition(true)
       }
 
       recognitionRef.current = recognition
-      try {
-        recognition.start()
-        setIsRecording(true)
-        setRecordingTime(0)
-        timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
-      } catch (err) {
-        console.error(err)
-      }
+      recognition.start()
+      setIsRecording(true)
+      setRecordingTime(0)
+      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
+    } catch (err: any) {
+      console.error('Failed to start speech recognition:', err)
+      cleanupAiSpeechRecognition()
+      alert('Could not start speech recognition: ' + (err.message || 'Please try again.'))
     }
-  }
+  }, [aiInput, t, cleanupAiSpeechRecognition, stopAiSpeechRecognition])
+
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      stopAiSpeechRecognition(true)
+    } else {
+      startAiSpeechRecognition()
+    }
+  }, [isRecording, stopAiSpeechRecognition, startAiSpeechRecognition])
 
   const sendAiMessage = useCallback(async (text?: string) => {
     if (mentionQuery !== null) setMentionQuery(null) // Close mention dropdown on send
+    if (isRecording) {
+      stopAiSpeechRecognition(false)
+    }
     const content = (text ?? aiInput).trim()
     if (!content && aiAttachments.length === 0) return
 
@@ -1134,7 +1276,7 @@ export default function ChatBot() {
           const reader = new FileReader()
           reader.onload = (event) => {
             const dataUrl = event.target?.result as string
-            resolve({ type: 'audio', data: dataUrl.split(',')[1], mimeType: 'audio/webm' })
+            resolve({ type: 'audio', data: dataUrl.split(',')[1], mimeType: att.blob?.type || 'audio/webm' })
           }
           reader.readAsDataURL(att.blob!)
         })
@@ -1176,7 +1318,7 @@ export default function ChatBot() {
       abortControllerRef.current = null
       setAiLoading(false)
     }
-  }, [aiInput, aiMessages, aiLoading, gameCount, totalViews, aiAttachments, t])
+  }, [aiInput, aiMessages, aiLoading, gameCount, totalViews, aiAttachments, t, isRecording, stopAiSpeechRecognition])
 
   const handleStopAi = () => {
     if (abortControllerRef.current) {
@@ -1196,6 +1338,30 @@ export default function ChatBot() {
       el.style.height = Math.min(el.scrollHeight, 200) + 'px'
     })
   }, [supportInput])
+
+  // ── Cleanup voice recording & speech recognition on mode change or chat close ──
+  useEffect(() => {
+    if (!open) {
+      cleanupAiSpeechRecognition()
+      cleanupSupportRecording()
+    }
+  }, [open, cleanupAiSpeechRecognition, cleanupSupportRecording])
+
+  useEffect(() => {
+    if (mode === 'ai') {
+      cleanupSupportRecording()
+    } else {
+      cleanupAiSpeechRecognition()
+    }
+  }, [mode, cleanupSupportRecording, cleanupAiSpeechRecognition])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanupAiSpeechRecognition()
+      cleanupSupportRecording()
+    }
+  }, [cleanupAiSpeechRecognition, cleanupSupportRecording])
 
   // ── @Mention Logic ──
   const filteredGames = useMemo(() => {
