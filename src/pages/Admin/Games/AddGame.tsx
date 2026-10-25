@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 import { Plus, Minus, Save, ArrowLeft, Loader2, CheckCircle, AlertCircle, Image, Bot, Gamepad2, Search, RotateCcw, Trash2, X, Globe } from 'lucide-react'
 import AiAutoFillCard, { loadSavedAiFilter } from '../../../components/AiAutoFill/AiAutoFillCard'
@@ -165,6 +165,7 @@ function getYouTubeId(url: string) {
 
 export default function AddGame() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [categories, setCategories] = useState<Category[]>([])
   // Gemini AI search
   const [aiQuery, setAiQuery] = useState('')
@@ -212,13 +213,16 @@ export default function AddGame() {
   useEffect(() => { setSlug(slugify(title)) }, [title])
 
 
-  // ── Reload session detection ──────────────────────────────────────────
+  // ── Mobile-safe Reload & Session Detection ───────────────────────────
+  // Detects if the user was actively working on this form and refreshed the browser (pull-to-refresh or tap reload)
   const isAccidentalReload = (): boolean => {
+    if (typeof window === 'undefined') return false
     try {
       const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
       const isReload = nav ? nav.type === 'reload' : (window.performance as any)?.navigation?.type === 1
       const wasActive = sessionStorage.getItem('la_game_add_active_session') === 'active'
-      return Boolean(isReload && wasActive)
+      // Browser reload event OR active editing session surviving in current tab session
+      return Boolean(isReload || wasActive)
     } catch {
       return false
     }
@@ -226,27 +230,27 @@ export default function AddGame() {
 
   const [isReloadSession] = useState(isAccidentalReload)
 
+  // Clear active session flag only when navigating fresh from another internal page
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      sessionStorage.setItem('la_game_is_reloading', 'true')
+    // If navigation came from an internal route change (location.key !== 'default')
+    // and not a browser reload, reset the active session to start clean
+    if (location.key !== 'default') {
+      try {
+        const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+        const isReload = nav ? nav.type === 'reload' : (window.performance as any)?.navigation?.type === 1
+        if (!isReload) {
+          sessionStorage.removeItem('la_game_add_active_session')
+        }
+      } catch {}
     }
-    window.addEventListener('beforeunload', handleBeforeUnload)
+  }, [location.key])
 
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-      const isReloading = sessionStorage.getItem('la_game_is_reloading') === 'true'
-      if (!isReloading) {
-        sessionStorage.removeItem('la_game_add_active_session')
-      } else {
-        sessionStorage.removeItem('la_game_is_reloading')
-      }
-    }
-  }, [])
-
-  // Mark session active when user enters any content
+  // Mark session active whenever the user enters or edits any content
   useEffect(() => {
     if (title.trim() || fileSize.trim() || description.trim() || coverImage.trim() || screenshots.length > 0) {
-      sessionStorage.setItem('la_game_add_active_session', 'active')
+      try {
+        sessionStorage.setItem('la_game_add_active_session', 'active')
+      } catch {}
     }
   }, [title, fileSize, description, coverImage, screenshots.length])
 

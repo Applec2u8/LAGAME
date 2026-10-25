@@ -654,6 +654,18 @@ export default function EditGame() {
   const { clearDraft } = useFormDraft<EditGameDraft>({
     storageKey: `la_game_draft_editgame_${id}`,
     state: { title, description, fileSize, videoUrl, coverImage, screenshots, categoryIds, isFeatured, isComingSoon, platforms, minAbout, recAbout, links },
+    hasContent: (d) => Boolean(
+      d.title?.trim() ||
+      d.description?.trim() ||
+      d.fileSize?.trim() ||
+      d.coverImage?.trim() ||
+      d.videoUrl?.trim() ||
+      (d.screenshots && d.screenshots.length > 0) ||
+      (d.categoryIds && d.categoryIds.length > 0) ||
+      (d.links && d.links.some(l => l.url?.trim())) ||
+      d.minAbout?.trim() ||
+      d.recAbout?.trim()
+    ),
     onRestore: (draft) => {
       // Wait until DB data has loaded before applying draft (avoids race condition)
       const applyDraft = () => {

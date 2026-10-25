@@ -2,7 +2,15 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import styled, { keyframes, css } from 'styled-components'
 import { MessageSquare, Send, RefreshCw, Trash2, Clock, Paperclip, File, Mic, Square, X, Copy, Reply, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
-import { getSupportedAudioMimeType, stopMediaStreamTracks, getAudioFileExtension, requestMicrophoneAccess } from '../../../lib/audioUtils'
+import {
+  getSupportedAudioMimeType,
+  stopMediaStreamTracks,
+  getAudioFileExtension,
+  requestMicrophoneAccess,
+  formatAudioDuration,
+  parseVoiceMessageDuration
+} from '../../../lib/audioUtils'
+import { VoiceMessagePlayer } from '../../../components/ChatBot/VoiceMessagePlayer'
 
 // ── Types ─────────────────────────────────────────────────────────
 interface SupportSession {
@@ -292,9 +300,10 @@ export default function AdminSupport() {
   const [mentionFilter, setMentionFilter] = useState('')
   const [mentionIndex, setMentionIndex] = useState(0)
 
-  const [attachments, setAttachments] = useState<{ id: string, file?: File, blob?: Blob, url: string, type: 'image' | 'audio' | 'file', name?: string }[]>([])
+  const [attachments, setAttachments] = useState<{ id: string, file?: File, blob?: Blob, url: string, type: 'image' | 'audio' | 'file', name?: string, duration?: number }[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const recordingTimeRef = useRef<number>(0)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -327,9 +336,17 @@ export default function AdminSupport() {
     }
 
     audioChunksRef.current = []
+    recordingTimeRef.current = 0
     setIsRecording(false)
     setRecordingTime(0)
   }, [])
+
+  // Guarantee clean release of audio session when unmounting
+  useEffect(() => {
+    return () => {
+      cleanupAudioRecording()
+    }
+  }, [cleanupAudioRecording])
 
   const stopRecording = useCallback(() => {
     if (timerRef.current) {
@@ -375,6 +392,7 @@ export default function AdminSupport() {
       const recorder = new MediaRecorder(stream, recorderOptions)
       mediaRecorderRef.current = recorder
       audioChunksRef.current = []
+      recordingTimeRef.current = 0
       setRecordingTime(0)
 
       // Collect data in timesliced chunks — helps iOS Safari flush data reliably
@@ -391,6 +409,7 @@ export default function AdminSupport() {
             const audioBlob = new Blob(audioChunksRef.current, { type: actualMime })
             if (audioBlob.size > 0) {
               const blobUrl = URL.createObjectURL(audioBlob)
+              const recordedDuration = recordingTimeRef.current
               // Functional state update ensures React flushes correctly on mobile
               setAttachments(prev => [
                 ...prev,
@@ -399,6 +418,7 @@ export default function AdminSupport() {
                   blob: audioBlob,
                   url: blobUrl,
                   type: 'audio' as const,
+                  duration: recordedDuration,
                 }
               ])
             }
@@ -423,7 +443,12 @@ export default function AdminSupport() {
       // Use 250ms timeslice so iOS Safari fires ondataavailable continuously
       recorder.start(250)
       setIsRecording(true)
-      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
+      recordingTimeRef.current = 0
+      setRecordingTime(0)
+      timerRef.current = window.setInterval(() => {
+        recordingTimeRef.current += 1
+        setRecordingTime(recordingTimeRef.current)
+      }, 1000)
     } catch (e: any) {
       stopMediaStreamTracks(stream)
       cleanupAudioRecording()
@@ -647,11 +672,14 @@ export default function AdminSupport() {
       const { data: urlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName)
       const type = att.type === 'audio' ? 'audio' : (uploadFile.type.startsWith('image/') ? 'image' : 'file')
 
+      const durationLabel = isAudio && att.duration ? ` (${formatAudioDuration(att.duration)})` : ''
+      const msgContent = att.type === 'audio' ? `🎤 Voice Message${durationLabel}` : `แนบไฟล์: ${uploadName}`
+
       const { data: msg } = await (supabase as any)
         .from('support_messages').insert({
           session_id: selected.id,
           role: 'admin',
-          content: att.type === 'audio' ? '🎤 Voice Message' : `แนบไฟล์: ${uploadName}`,
+          content: msgContent,
           attachment_url: urlData.publicUrl,
           attachment_type: type
         }).select('*').single()
@@ -845,8 +873,12 @@ export default function AdminSupport() {
                           <AttachmentImage src={msg.attachment_url} onClick={() => setLightboxUrl(msg.attachment_url!)} />
                         )}
                         {msg.attachment_url && msg.attachment_type === 'audio' && (
-                          <div style={{ marginTop: 4 }}>
-                            <audio controls src={msg.attachment_url} style={{ width: '100%', minWidth: 200, maxWidth: 240, height: 36, display: 'block' }} />
+                          <div style={{ marginTop: 6 }}>
+                            <VoiceMessagePlayer
+                              src={msg.attachment_url}
+                              initialDuration={parseVoiceMessageDuration(msg.content) || 0}
+                              isAdmin={msg.role === 'admin'}
+                            />
                           </div>
                         )}
                         {msg.attachment_url && msg.attachment_type === 'file' && (
@@ -886,10 +918,13 @@ export default function AdminSupport() {
                         <RemovePreviewBtn onClick={() => removeAttachment(att.id)}><X size={12} /></RemovePreviewBtn>
                       </PreviewWrap>
                     ) : (
-                      <div key={att.id} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.4)', padding: '4px 10px', borderRadius: 12, minWidth: 0, position: 'relative', maxWidth: 200 }}>
-                        <audio controls src={att.url} style={{ height: 30, flex: 1, minWidth: 0 }} />
-                        <RemovePreviewBtn style={{ top: -6, right: -6 }} onClick={() => removeAttachment(att.id)}><Trash2 size={12} /></RemovePreviewBtn>
-                      </div>
+                      <VoiceMessagePlayer
+                        key={att.id}
+                        src={att.url}
+                        initialDuration={att.duration || 0}
+                        compact
+                        onDelete={() => removeAttachment(att.id)}
+                      />
                     )
                   ))}
                 </div>

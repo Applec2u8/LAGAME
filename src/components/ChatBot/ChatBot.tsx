@@ -7,7 +7,15 @@ import type { ChatMessage } from '../../lib/chatService'
 import { getActiveModelInfo } from '../../lib/aiProvider'
 import { detectPlatform } from '../../lib/analytics'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
-import { getSupportedAudioMimeType, stopMediaStreamTracks, getAudioFileExtension, requestMicrophoneAccess } from '../../lib/audioUtils'
+import {
+  getSupportedAudioMimeType,
+  stopMediaStreamTracks,
+  getAudioFileExtension,
+  requestMicrophoneAccess,
+  formatAudioDuration,
+  parseVoiceMessageDuration
+} from '../../lib/audioUtils'
+import { VoiceMessagePlayer } from './VoiceMessagePlayer'
 
 // ── Keyframes ─────────────────────────────────────────────────────
 const slideUp = keyframes`from { opacity: 0; transform: translateY(24px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); }`
@@ -510,9 +518,10 @@ export default function ChatBot() {
   const [supportReplyingTo, setSupportReplyingTo] = useState<string | null>(null)
   const [nameInput, setNameInput] = useState('')
   // Support Chat attachments queue (images + audio previewed before send)
-  const [supportAttachments, setSupportAttachments] = useState<{ id: string; file?: File; blob?: Blob; url: string; type: 'image' | 'audio'; name?: string }[]>([])
+  const [supportAttachments, setSupportAttachments] = useState<{ id: string; file?: File; blob?: Blob; url: string; type: 'image' | 'audio'; name?: string; duration?: number }[]>([])
   const [isSupportRecording, setIsSupportRecording] = useState(false)
   const [supportRecordingTime, setSupportRecordingTime] = useState(0)
+  const supportRecordingTimeRef = useRef<number>(0)
   const supportMediaRecorderRef = useRef<MediaRecorder | null>(null)
   const supportMediaStreamRef = useRef<MediaStream | null>(null)
   const supportAudioChunksRef = useRef<Blob[]>([])
@@ -762,11 +771,14 @@ export default function ChatBot() {
       const { data: urlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName)
       const type = att.type === 'audio' ? 'audio' : (uploadFile.type.startsWith('image/') ? 'image' : 'file')
 
+      const durationLabel = isAudio && att.duration ? ` (${formatAudioDuration(att.duration)})` : ''
+      const msgContent = att.type === 'audio' ? `🎤 Voice Message${durationLabel}` : `📎 ${uploadName}`
+
       const { data: msg } = await (supabase as any)
         .from('support_messages').insert({
           session_id: supportSessionId,
           role: 'user',
-          content: att.type === 'audio' ? '🎤 Voice Message' : `📎 ${uploadName}`,
+          content: msgContent,
           attachment_url: urlData.publicUrl,
           attachment_type: type
         }).select('*').single()
@@ -871,6 +883,7 @@ export default function ChatBot() {
     }
 
     supportAudioChunksRef.current = []
+    supportRecordingTimeRef.current = 0
     setIsSupportRecording(false)
     setSupportRecordingTime(0)
   }, [])
@@ -919,6 +932,7 @@ export default function ChatBot() {
       const recorder = new MediaRecorder(stream, recorderOptions)
       supportMediaRecorderRef.current = recorder
       supportAudioChunksRef.current = []
+      supportRecordingTimeRef.current = 0
       setSupportRecordingTime(0)
 
       // Collect data in timesliced chunks — helps iOS Safari flush data reliably
@@ -935,6 +949,7 @@ export default function ChatBot() {
             const audioBlob = new Blob(supportAudioChunksRef.current, { type: actualMime })
             if (audioBlob.size > 0) {
               const blobUrl = URL.createObjectURL(audioBlob)
+              const recordedDuration = supportRecordingTimeRef.current
               // Use functional state update to guarantee React flushes on mobile
               setSupportAttachments(prev => [
                 ...prev,
@@ -943,6 +958,7 @@ export default function ChatBot() {
                   blob: audioBlob,
                   url: blobUrl,
                   type: 'audio' as const,
+                  duration: recordedDuration,
                 }
               ])
             }
@@ -967,7 +983,12 @@ export default function ChatBot() {
       // Use 250ms timeslice so iOS Safari fires ondataavailable continuously
       recorder.start(250)
       setIsSupportRecording(true)
-      supportTimerRef.current = window.setInterval(() => setSupportRecordingTime(prev => prev + 1), 1000)
+      supportRecordingTimeRef.current = 0
+      setSupportRecordingTime(0)
+      supportTimerRef.current = window.setInterval(() => {
+        supportRecordingTimeRef.current += 1
+        setSupportRecordingTime(supportRecordingTimeRef.current)
+      }, 1000)
     } catch (e: any) {
       stopMediaStreamTracks(stream)
       cleanupSupportRecording()
@@ -1119,54 +1140,53 @@ export default function ChatBot() {
     }
   }
 
-  // Track whether recognition is intentionally stopping to avoid stale onend restarts
+  // Strict lifecycle refs for cross-platform SpeechRecognition
   const isStoppingRecognitionRef = useRef(false)
+  const isRecordingRef = useRef(false)
+  const recognitionRestartTimerRef = useRef<number | null>(null)
 
   // Clean up speech recognition instance and timer safely
   const cleanupAiSpeechRecognition = useCallback(() => {
     isStoppingRecognitionRef.current = true
+    isRecordingRef.current = false
+    setIsRecording(false)
+
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
 
+    if (recognitionRestartTimerRef.current) {
+      clearTimeout(recognitionRestartTimerRef.current)
+      recognitionRestartTimerRef.current = null
+    }
+
     if (recognitionRef.current) {
       const rec = recognitionRef.current
+      // 1. Clear all listeners immediately so no zombie callbacks fire
       rec.onresult = null
       rec.onerror = null
       rec.onend = null
+      rec.onstart = null
+      rec.onspeechstart = null
+      rec.onspeechend = null
+
+      // 2. Explicitly stop and abort to release audio capture session
+      try {
+        rec.stop()
+      } catch {}
       try {
         rec.abort()
-      } catch (e) {
-        try { rec.stop() } catch {}
-      }
+      } catch {}
+
       recognitionRef.current = null
     }
 
-    setIsRecording(false)
     setRecordingTime(0)
   }, [])
 
   const stopAiSpeechRecognition = useCallback((saveTranscript = true) => {
-    isStoppingRecognitionRef.current = true
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    setIsRecording(false)
-
-    if (recognitionRef.current) {
-      const rec = recognitionRef.current
-      rec.onresult = null
-      rec.onerror = null
-      rec.onend = null
-      try {
-        rec.abort()
-      } catch (e) {
-        try { rec.stop() } catch {}
-      }
-      recognitionRef.current = null
-    }
+    cleanupAiSpeechRecognition()
 
     if (saveTranscript && speechTranscriptRef.current) {
       const finalVal = speechTranscriptRef.current.trim()
@@ -1190,7 +1210,7 @@ export default function ChatBot() {
         try { aiTextRef.current.setSelectionRange(len, len) } catch {}
       }
     }, 80)
-  }, [])
+  }, [cleanupAiSpeechRecognition])
 
   const startAiSpeechRecognition = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -1199,15 +1219,14 @@ export default function ChatBot() {
       return
     }
 
-    // Clean up any prior recognition instance before starting a fresh one
+    // 1. Strict cleanup of any existing instance before creating a fresh one
     cleanupAiSpeechRecognition()
-    // Reset the intentional-stop guard so onend can fire normally
     isStoppingRecognitionRef.current = false
 
     try {
       const recognition = new SpeechRecognition()
       // iOS Safari webkitSpeechRecognition does NOT support continuous=true reliably.
-      // We use continuous on Chrome/Android but disable it on iOS to avoid stall.
+      // We use continuous on Chrome/Android but disable it on iOS to avoid audio engine stalls.
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
       recognition.continuous = !isIOS
       recognition.interimResults = true
@@ -1219,6 +1238,16 @@ export default function ChatBot() {
         initialTranscript += ' '
       }
       speechTranscriptRef.current = initialTranscript
+
+      // Only begin recording state and timer WHEN microphone is actually engaged (onstart).
+      // This prevents phantom timers running while native permission prompt is displayed!
+      recognition.onstart = () => {
+        isRecordingRef.current = true
+        setIsRecording(true)
+        setRecordingTime(0)
+        if (timerRef.current) clearInterval(timerRef.current)
+        timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
+      }
 
       recognition.onresult = (e: any) => {
         let interimTranscript = ''
@@ -1237,7 +1266,7 @@ export default function ChatBot() {
 
         const fullText = speechTranscriptRef.current + interimTranscript
 
-        // Write to DOM first (bypasses React mobile focus lock for instant feedback)
+        // Write to DOM first for instant feedback on mobile touch keyboards
         if (aiTextRef.current) {
           aiTextRef.current.value = fullText
           aiTextRef.current.style.height = 'auto'
@@ -1248,45 +1277,58 @@ export default function ChatBot() {
       }
 
       recognition.onerror = (e: any) => {
-        // 'no-speech' is benign on iOS — ignore it
+        // 'no-speech' is benign on mobile iOS/Android — ignore it
         if (e.error === 'no-speech') return
         console.warn('Speech recognition error:', e.error)
         if (e.error === 'not-allowed') {
           alert('Microphone access denied. Please allow microphone permissions in your browser.')
+          cleanupAiSpeechRecognition()
+          return
         }
         stopAiSpeechRecognition(true)
       }
 
       recognition.onend = () => {
-        // On iOS, recognition fires onend after each utterance even in continuous mode.
-        // If we didn't intentionally stop it, restart it to simulate continuous recording.
-        if (!isStoppingRecognitionRef.current && isRecording) {
-          try {
-            // Brief pause then restart to avoid iOS session lock
-            setTimeout(() => {
-              if (!isStoppingRecognitionRef.current && recognitionRef.current === recognition) {
-                try { recognition.start() } catch { stopAiSpeechRecognition(true) }
-              }
-            }, 150)
-            return
-          } catch {
-            // fall through to stop
-          }
+        // If intentionally stopping or no longer in active recording, do full teardown
+        if (isStoppingRecognitionRef.current || !isRecordingRef.current) {
+          cleanupAiSpeechRecognition()
+          return
         }
+
+        // On iOS, webkitSpeechRecognition fires onend after each utterance.
+        // If user is still actively recording, schedule a clean restart.
+        if (isIOS && isRecordingRef.current) {
+          recognitionRestartTimerRef.current = window.setTimeout(() => {
+            if (!isStoppingRecognitionRef.current && isRecordingRef.current && recognitionRef.current === recognition) {
+              try {
+                recognition.start()
+              } catch {
+                stopAiSpeechRecognition(true)
+              }
+            }
+          }, 150)
+          return
+        }
+
         stopAiSpeechRecognition(true)
       }
 
       recognitionRef.current = recognition
       recognition.start()
-      setIsRecording(true)
-      setRecordingTime(0)
-      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
     } catch (err: any) {
       console.error('Failed to start speech recognition:', err)
       cleanupAiSpeechRecognition()
       alert('Could not start speech recognition: ' + (err.message || 'Please try again.'))
     }
-  }, [aiInput, t, cleanupAiSpeechRecognition, stopAiSpeechRecognition, isRecording])
+  }, [aiInput, t, cleanupAiSpeechRecognition, stopAiSpeechRecognition])
+
+  // Clean up all recording sessions if component unmounts
+  useEffect(() => {
+    return () => {
+      cleanupAiSpeechRecognition()
+      cleanupSupportRecording()
+    }
+  }, [cleanupAiSpeechRecognition, cleanupSupportRecording])
 
   const toggleRecording = useCallback(() => {
     if (isRecording) {
@@ -1599,7 +1641,10 @@ export default function ChatBot() {
                             <AttachmentImage src={`data:${att.mimeType};base64,${att.data}`} onClick={() => setLightboxUrl(`data:${att.mimeType};base64,${att.data}`)} />
                           )}
                           {att.type === 'audio' && (
-                            <audio controls src={`data:${att.mimeType};base64,${att.data}`} style={{ height: 36, maxWidth: 220 }} />
+                            <VoiceMessagePlayer
+                              src={`data:${att.mimeType};base64,${att.data}`}
+                              initialDuration={(att as any).duration || 0}
+                            />
                           )}
                         </div>
                       ))}
@@ -1641,10 +1686,13 @@ export default function ChatBot() {
                           <RemovePreviewBtn onClick={() => removeAiAttachment(att.id)}><X size={12} /></RemovePreviewBtn>
                         </PreviewWrap>
                       ) : (
-                        <div key={att.id} style={{ flexShrink: 0, width: 220, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.2)', padding: '4px 10px', borderRadius: 12, minWidth: 0, position: 'relative' }}>
-                          <audio controls src={att.url} style={{ height: 32, flex: 1, minWidth: 0, width: '100%' }} />
-                          <RemovePreviewBtn style={{ top: -6, right: -6 }} onClick={() => removeAiAttachment(att.id)}><Trash2 size={12} /></RemovePreviewBtn>
-                        </div>
+                        <VoiceMessagePlayer
+                          key={att.id}
+                          src={att.url}
+                          initialDuration={(att as any).duration || 0}
+                          compact
+                          onDelete={() => removeAiAttachment(att.id)}
+                        />
                       )
                     ))}
                   </div>
@@ -1798,14 +1846,18 @@ export default function ChatBot() {
                     {msg.role === 'admin' && <RoleLabel $admin>Admin</RoleLabel>}
                     <BubbleWrap $isUser={msg.role === 'user'}>
                       <Bubble $role={msg.role}>
-                        {/* Debug info */}
-                        {msg.content && renderMessageContent(msg.content)}
+                        {/* Message text for non-audio messages */}
+                        {msg.content && msg.attachment_type !== 'audio' && renderMessageContent(msg.content)}
                         {msg.attachment_url && msg.attachment_type === 'image' && (
                           <AttachmentImage src={msg.attachment_url} onClick={() => setLightboxUrl(msg.attachment_url!)} />
                         )}
                         {msg.attachment_url && msg.attachment_type === 'audio' && (
-                          <div style={{ marginTop: 4 }}>
-                            <audio controls src={msg.attachment_url} style={{ width: '100%', minWidth: 200, maxWidth: 240, height: 36, display: 'block' }} />
+                          <div style={{ marginTop: 6 }}>
+                            <VoiceMessagePlayer
+                              src={msg.attachment_url}
+                              initialDuration={parseVoiceMessageDuration(msg.content) || 0}
+                              isAdmin={msg.role === 'admin'}
+                            />
                           </div>
                         )}
                         {msg.attachment_url && msg.attachment_type === 'file' && (
@@ -1864,10 +1916,13 @@ export default function ChatBot() {
                             <RemovePreviewBtn onClick={() => removeSupportAttachment(att.id)}><X size={12} /></RemovePreviewBtn>
                           </PreviewWrap>
                         ) : (
-                          <div key={att.id} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.2)', padding: '4px 10px', borderRadius: 12, minWidth: 0, position: 'relative', maxWidth: 200 }}>
-                            <audio controls src={att.url} style={{ height: 30, flex: 1, minWidth: 0 }} />
-                            <RemovePreviewBtn style={{ top: -6, right: -6 }} onClick={() => removeSupportAttachment(att.id)}><Trash2 size={12} /></RemovePreviewBtn>
-                          </div>
+                          <VoiceMessagePlayer
+                            key={att.id}
+                            src={att.url}
+                            initialDuration={att.duration || 0}
+                            compact
+                            onDelete={() => removeSupportAttachment(att.id)}
+                          />
                         )
                       ))}
                     </div>

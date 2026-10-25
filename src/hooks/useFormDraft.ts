@@ -1,28 +1,80 @@
 /**
  * useFormDraft.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Generic hook for auto-saving and restoring form draft state via localStorage.
- * - Debounced auto-save on every state change (600ms)
- * - Supports `autoRestore: true` (for page refresh / edit mode)
- * - Supports `autoRestore: false` (fresh sessions — draft offered via banner)
- * - Exposes `savedDraft`, `hasDraft`, `restoreDraft()`, `clearDraft()`
+ * Cross-platform form draft persistence with mobile-first lifecycle management.
  *
- * FIX: Eliminated "Maximum update depth exceeded" infinite loop by:
- *   1. Storing state in a ref for the auto-save effect (avoids effect re-run on every keystroke)
- *   2. Using a stable debounce timer that compares serialized state before saving
- *   3. Guarding restore with a flag ref so re-renders from `onRestore` don't re-trigger the effect
+ * Solves mobile state loss on refresh/tab suspension (iOS Safari & Android Chrome) via:
+ * 1. Safe Multi-Tier Storage (localStorage + sessionStorage fallback with quota safety)
+ * 2. Real-Time Debounced Saving (saves as user types, not just on timer)
+ * 3. Immediate Synchronous Flush on Mobile Lifecycle Events (pagehide, visibilitychange:hidden, beforeunload)
+ * 4. Reliable Hydration on Mount with safe JSON parsing and content validation
+ * 5. Infinite Loop Prevention using stable refs and state diffing
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 
+/** Safe storage wrapper with dual localStorage/sessionStorage persistence and quota handling */
+export const safeStorage = {
+  get: <T>(key: string): T | null => {
+    if (typeof window === 'undefined') return null
+    // 1. Try localStorage
+    try {
+      const local = window.localStorage.getItem(key)
+      if (local) return JSON.parse(local) as T
+    } catch {}
+
+    // 2. Fallback: sessionStorage (e.g. mobile Safari private mode)
+    try {
+      const session = window.sessionStorage.getItem(key)
+      if (session) return JSON.parse(session) as T
+    } catch {}
+
+    return null
+  },
+
+  set: <T>(key: string, value: T): boolean => {
+    if (typeof window === 'undefined') return false
+    let serialized: string
+    try {
+      serialized = JSON.stringify(value)
+    } catch (e) {
+      console.warn('[useFormDraft] Serialization failed:', e)
+      return false
+    }
+
+    let saved = false
+    // 1. Write to localStorage
+    try {
+      window.localStorage.setItem(key, serialized)
+      saved = true
+    } catch (e) {
+      console.warn('[useFormDraft] localStorage.setItem failed (quota/private mode):', e)
+    }
+
+    // 2. Also write to sessionStorage for redundancy on mobile web views
+    try {
+      window.sessionStorage.setItem(key, serialized)
+      saved = true
+    } catch {}
+
+    return saved
+  },
+
+  remove: (key: string): void => {
+    if (typeof window === 'undefined') return
+    try { window.localStorage.removeItem(key) } catch {}
+    try { window.sessionStorage.removeItem(key) } catch {}
+  }
+}
+
 export interface UseFormDraftOptions<T> {
-  /** Unique localStorage key for this form */
+  /** Unique storage key for this form */
   storageKey: string
   /** Current serialisable form state to persist */
   state: T
   /** Called when draft is restored; apply values here */
   onRestore: (draft: T) => void
-  /** Debounce delay in ms (default 600) */
+  /** Debounce delay in ms (default 300ms for fast mobile persistence) */
   debounceMs?: number
   /**
    * If true (default), draft is automatically applied on mount.
@@ -46,7 +98,7 @@ export function useFormDraft<T extends object>({
   storageKey,
   state,
   onRestore,
-  debounceMs = 600,
+  debounceMs = 300,
   autoRestore = true,
   hasContent,
 }: UseFormDraftOptions<T>): UseFormDraftReturn<T> {
@@ -54,21 +106,23 @@ export function useFormDraft<T extends object>({
   const [hasDraft, setHasDraft] = useState(false)
   const [draftRestored, setDraftRestored] = useState(false)
 
-  // ── Stable refs (never change identity → never cause effect re-runs) ────────
+  // ── Stable refs to prevent effect re-trigger cycles ───────────────────────
   const isRestoredRef = useRef(false)
   const isMountedRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSavedRef = useRef<string>('')        // last JSON we wrote to localStorage
+  const lastSavedRef = useRef<string>('')
   const onRestoreRef = useRef(onRestore)
-  const stateRef = useRef(state)                 // always current, no dep array needed
+  const stateRef = useRef(state)
   const storageKeyRef = useRef(storageKey)
+  const autoRestoreRef = useRef(autoRestore)
 
-  // Keep refs in sync with latest values on every render (no effect, no deps)
+  // Update refs synchronously on every render
   onRestoreRef.current = onRestore
   stateRef.current = state
   storageKeyRef.current = storageKey
+  autoRestoreRef.current = autoRestore
 
-  // ── hasContent helper (stable) ──────────────────────────────────────────────
+  // ── Stable hasContent checker ─────────────────────────────────────────────
   const hasContentRef = useRef(hasContent)
   hasContentRef.current = hasContent
 
@@ -90,65 +144,107 @@ export function useFormDraft<T extends object>({
       }
       return false
     })
-  }, []) // no deps — reads hasContentRef.current at call-time
+  }, [])
 
-  // ── Initial draft check on mount (runs once) ────────────────────────────────
+  // ── Synchronous flush to storage ──────────────────────────────────────────
+  const saveNow = useCallback(() => {
+    const currentState = stateRef.current
+    const key = storageKeyRef.current
+
+    // Safety: Never overwrite an existing draft if the current state is empty and un-restored
+    if (!checkHasContent(currentState) && !isRestoredRef.current) {
+      return
+    }
+
+    const currentJson = JSON.stringify(currentState)
+    if (currentJson === lastSavedRef.current) return // No changes
+
+    const success = safeStorage.set(key, currentState)
+    if (success) {
+      lastSavedRef.current = currentJson
+    }
+  }, [checkHasContent])
+
+  // ── Initial draft check on mount (Hydration) ──────────────────────────────
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storageKey)
-      if (raw) {
-        const parsed = JSON.parse(raw) as T
-        if (checkHasContent(parsed)) {
-          lastSavedRef.current = raw
-          setSavedDraft(parsed)
-          if (autoRestore) {
-            onRestoreRef.current(parsed)
-            isRestoredRef.current = true
-            setDraftRestored(true)
-          } else {
-            setHasDraft(true)
-          }
-        }
+    const parsed = safeStorage.get<T>(storageKey)
+    if (parsed && checkHasContent(parsed)) {
+      lastSavedRef.current = JSON.stringify(parsed)
+      setSavedDraft(parsed)
+      if (autoRestoreRef.current) {
+        isRestoredRef.current = true
+        onRestoreRef.current(parsed)
+        setDraftRestored(true)
+      } else {
+        setHasDraft(true)
       }
-    } catch {
-      localStorage.removeItem(storageKey)
     }
     isMountedRef.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // intentionally empty — run once on mount only
+  }, []) // Mount-only
 
-  // ── Debounced auto-save using a stable interval ─────────────────────────────
-  // This effect does NOT depend on `state` directly — instead it reads stateRef.current
-  // inside the timer callback. This breaks the setState → effect → setState loop.
+  // ── Real-time debounced save as user interacts/types ──────────────────────
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isMountedRef.current) return
+    if (!isMountedRef.current) return
 
-      // Don't persist while user is viewing the "restore draft?" banner without having
-      // made any changes yet (prevents overwriting the displayed savedDraft)
-      if (!autoRestore && !isRestoredRef.current) return
+    // Don't save empty state before user restores or inputs content
+    if (!checkHasContent(state) && !isRestoredRef.current) return
 
-      const currentJson = JSON.stringify(stateRef.current)
-      if (currentJson === lastSavedRef.current) return // nothing changed
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+    }
 
-      try {
-        localStorage.setItem(storageKeyRef.current, currentJson)
-        lastSavedRef.current = currentJson
-      } catch {
-        /* quota exceeded — silently skip */
-      }
+    timerRef.current = setTimeout(() => {
+      saveNow()
     }, debounceMs)
 
-    return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounceMs, autoRestore]) // only re-create if these config values change
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [state, debounceMs, checkHasContent, saveNow])
 
-  // ── Public API ──────────────────────────────────────────────────────────────
+  // ── Mobile Lifecycle Hooks (Immediate Flush before refresh / tab switch) ───
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // visibilitychange (hidden) is the most reliable event on iOS Safari & Android Chrome
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        saveNow()
+      }
+    }
+
+    const handlePageHide = () => {
+      // pagehide fires reliably on mobile browsers when refreshing or navigating away
+      saveNow()
+    }
+
+    const handleBeforeUnload = () => {
+      // desktop fallback
+      saveNow()
+    }
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', handlePageHide)
+      window.addEventListener('beforeunload', handleBeforeUnload)
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pagehide', handlePageHide)
+        window.removeEventListener('beforeunload', handleBeforeUnload)
+      }
+    }
+  }, [saveNow])
+
+  // ── Public API ────────────────────────────────────────────────────────────
   const restoreDraft = useCallback(() => {
     const draft = savedDraft
     if (!draft) return
-    // Mark restored BEFORE calling onRestore to prevent any auto-save
-    // triggered by the resulting setState calls from writing an empty state
     isRestoredRef.current = true
     onRestoreRef.current(draft)
     setDraftRestored(true)
@@ -157,10 +253,11 @@ export function useFormDraft<T extends object>({
 
   const clearDraft = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    try { localStorage.removeItem(storageKeyRef.current) } catch { /* ok */ }
+    safeStorage.remove(storageKeyRef.current)
     lastSavedRef.current = ''
     setSavedDraft(null)
     setHasDraft(false)
+    isRestoredRef.current = false
   }, [])
 
   const dismissDraftPrompt = useCallback(() => {
