@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
-import { Plus, Minus, Save, ArrowLeft, Loader2, CheckCircle, AlertCircle, Image, Bot, Gamepad2, Search } from 'lucide-react'
-import AiAutoFillCard from '../../../components/AiAutoFill/AiAutoFillCard'
+import { Plus, Minus, Save, ArrowLeft, Loader2, CheckCircle, AlertCircle, Image, Bot, Gamepad2, Search, RotateCcw, Trash2, X, Globe } from 'lucide-react'
+import AiAutoFillCard, { loadSavedAiFilter } from '../../../components/AiAutoFill/AiAutoFillCard'
 import type { CacheFieldSelection } from '../../../components/AiAutoFill/AiAutoFillCard'
 import CoverImagePicker from '../../../components/CoverImagePicker/CoverImagePicker'
 import type { CoverOrientation } from '../../../components/CoverImagePicker/CoverImagePicker'
@@ -11,7 +11,7 @@ import { supabase } from '../../../lib/supabase'
 import type { Category } from '../../../lib/supabase'
 import MultiSelectCategory from '../../../components/MultiSelectCategory'
 import { uploadImage } from '../../../lib/supabase'
-import { generateGameData } from '../../../lib/gemini'
+import { generateGameData, buildFilteredGamePrompt } from '../../../lib/gemini'
 import { fetchSteamGridDbImages } from '../../../lib/steamgriddb'
 import { upsertGameGeneration } from '../../../lib/gameGenerations'
 import type { GameGenerationRecord } from '../../../lib/gameGenerations'
@@ -28,27 +28,61 @@ const CLOUD_OPTIONS = ['1fichier', 'Buzzheavier', 'DataNodes', 'Dropbox', 'Gofil
 
 const FetchRow = styled.div`
   display: flex;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 8px;
-  flex-wrap: wrap;
   align-items: center;
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
 `
+
+const FetchBtnGroup = styled.div`
+  display: flex;
+  gap: 6px;
+  align-items: center;
+
+  @media (max-width: 640px) {
+    width: 100%;
+    & > button, & > label {
+      flex: 1;
+      justify-content: center;
+      text-align: center;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+  }
+`
+
 const FetchBtn = styled.button`
   flex-shrink: 0; display: flex; align-items: center; gap: 5px;
-  padding: 7px 11px; background: linear-gradient(135deg, #7c3aed, #06b6d4);
+  padding: 8px 13px; background: linear-gradient(135deg, #7c3aed, #06b6d4);
   border: none; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600;
   cursor: pointer; white-space: nowrap; transition: opacity 0.2s;
   &:hover { opacity: 0.9; } &:disabled { opacity: 0.5; cursor: not-allowed; }
 `
 
-
-const UploadBtn = styled.label`
-  display: flex; align-items: center; justify-content: center; gap: 5px;
-  padding: 7px 11px; background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3);
-  border-radius: 8px; color: #e2e8f0; font-size: 12px; font-weight: 600; cursor: pointer;
+const WebSearchBtn = styled.button`
+  flex-shrink: 0; display: flex; align-items: center; gap: 5px;
+  padding: 8px 12px; background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.35);
+  border-radius: 8px; color: #60a5fa; font-size: 12px; font-weight: 600; cursor: pointer;
   white-space: nowrap; transition: all 0.2s;
-  &:hover { background: rgba(124,58,237,0.3); }
-  &.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+  &:hover { background: rgba(59,130,246,0.25); color: #93c5fd; border-color: rgba(59,130,246,0.6); }
+  @media (max-width: 640px) {
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+`
+
+const CoverUploadBtn = styled.label`
+  flex-shrink: 0; display: flex; align-items: center; gap: 5px;
+  padding: 8px 12px;
+  background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.4);
+  border-radius: 8px; color: #a78bfa; font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; transition: all 0.2s;
+  &:hover { background: rgba(124,58,237,0.28); color: #c4b5fd; }
 `
 
 
@@ -73,8 +107,31 @@ const AddLinkBtn = styled.button`
   &:hover { background: rgba(124,58,237,0.15); color: #fff; }
 `
 
-const SpecGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px; @media(max-width:600px){grid-template-columns:1fr;}`
+const SpecGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px; @media(max-width:600px){grid-template-columns:1fr; gap: 0;}`
 const TwoColGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 16px; @media(max-width:600px){grid-template-columns:1fr; gap: 0;}`
+
+const DraftBanner = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: linear-gradient(135deg, rgba(124,58,237,0.16) 0%, rgba(6,182,212,0.1) 100%);
+  border: 1px solid rgba(124,58,237,0.4);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.3s ease;
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 12px 12px 14px 12px;
+  }
+`
 
 
 
@@ -116,6 +173,7 @@ export default function AddGame() {
   const [aiPreview, setAiPreview] = useState<any | null>(null)
   const [isApplying, setIsApplying] = useState(false)
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('la_game_last_ai_model') || 'gemini:gemini-flash-latest')
+  const [aiFilter, setAiFilter] = useState<CacheFieldSelection>(loadSavedAiFilter)
   // Form fields
   const [title, setTitle] = useState('')
   const [slug, setSlug] = useState('')
@@ -154,10 +212,61 @@ export default function AddGame() {
   useEffect(() => { setSlug(slugify(title)) }, [title])
 
 
+  // ── Reload session detection ──────────────────────────────────────────
+  const isAccidentalReload = (): boolean => {
+    try {
+      const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+      const isReload = nav ? nav.type === 'reload' : (window.performance as any)?.navigation?.type === 1
+      const wasActive = sessionStorage.getItem('la_game_add_active_session') === 'active'
+      return Boolean(isReload && wasActive)
+    } catch {
+      return false
+    }
+  }
+
+  const [isReloadSession] = useState(isAccidentalReload)
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      sessionStorage.setItem('la_game_is_reloading', 'true')
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      const isReloading = sessionStorage.getItem('la_game_is_reloading') === 'true'
+      if (!isReloading) {
+        sessionStorage.removeItem('la_game_add_active_session')
+      } else {
+        sessionStorage.removeItem('la_game_is_reloading')
+      }
+    }
+  }, [])
+
+  // Mark session active when user enters any content
+  useEffect(() => {
+    if (title.trim() || fileSize.trim() || description.trim() || coverImage.trim() || screenshots.length > 0) {
+      sessionStorage.setItem('la_game_add_active_session', 'active')
+    }
+  }, [title, fileSize, description, coverImage, screenshots.length])
+
   // ── Draft persistence ──────────────────────────────────────────────────
-  const { clearDraft } = useFormDraft<AddGameDraft>({
+  const { clearDraft, restoreDraft, savedDraft, hasDraft, dismissDraftPrompt } = useFormDraft<AddGameDraft>({
     storageKey: 'la_game_draft_addgame',
+    autoRestore: isReloadSession,
     state: { title, description, fileSize, videoUrl, coverImage, screenshots, categoryIds, isFeatured, isComingSoon, platforms, minAbout, recAbout, links },
+    hasContent: (d) => Boolean(
+      d.title?.trim() ||
+      d.description?.trim() ||
+      d.fileSize?.trim() ||
+      d.coverImage?.trim() ||
+      d.videoUrl?.trim() ||
+      (d.screenshots && d.screenshots.length > 0) ||
+      (d.categoryIds && d.categoryIds.length > 0) ||
+      (d.links && d.links.some(l => l.url?.trim())) ||
+      d.minAbout?.trim() ||
+      d.recAbout?.trim()
+    ),
     onRestore: (draft) => {
       if (draft.title) setTitle(draft.title)
       if (draft.description) setDescription(draft.description)
@@ -172,6 +281,7 @@ export default function AddGame() {
       if (draft.minAbout) setMinAbout(draft.minAbout)
       if (draft.recAbout) setRecAbout(draft.recAbout)
       if (draft.links?.length) setLinks(draft.links)
+      sessionStorage.setItem('la_game_add_active_session', 'active')
       // Show toast after a short delay (state needs to settle first)
       draftToastTimer.current = setTimeout(() => {
         setDraftToast(true)
@@ -181,27 +291,14 @@ export default function AddGame() {
   })
 
   // ── Fetch categories ───────────────────────────────────────────────────
-  const handleAiGenerate = async () => {
+  const handleAiGenerate = async (fields?: CacheFieldSelection) => {
     if (!aiQuery.trim()) return
+    const activeFilter = fields || aiFilter
+    if (fields) setAiFilter(fields)
     setAiLoading(true); setAiError(''); setAiPreview(null)
     try {
-      const prompt = `You are a game database expert. Given the game name "${aiQuery.trim()}", return a JSON object with the following fields:
-{
-  "title": "official game title",
-  "description": "a 2-3 paragraph description of the game (plot, gameplay, features)",
-  "genres": ["genre1", "genre2"] (list of genres e.g. Action, RPG, Strategy, Sports, Racing, Shooter, Adventure, Simulation, Horror, Puzzle, Fighting, Platform),
-  "file_size": "estimated game size e.g. 50 GB, 120 GB, 500 MB (just the number and unit)",
-  "platforms": ["windows", "macos", "ps2", "ps3", "ps4", "ps5", "switch", "xbox"] (list of platforms the game supports, must use exactly these lowercase IDs if applicable),
-  "video_url": "Accurate YouTube Game Trailer URL. MUST be a real, working watch URL. Priority: PS4 Trailer, then PS3 or PC Trailer.",
-  "minimum_requirements": "OS: Windows 10 64-bit\nCPU: Intel Core i5-8400\nRAM: 8 GB\nGPU: NVIDIA GTX 970",
-  "recommended_requirements": "OS: Windows 10/11 64-bit\nCPU: Intel Core i7-8700K\nRAM: 16 GB\nGPU: NVIDIA RTX 2080",
-  "steam_app_id": 12120, // The numeric Steam App ID for the game (crucial for fetching real images, provide it if the game is on Steam)
-  "cover_image": "URL to the official game cover",
-  "screenshots": ["URL1", "URL2", "URL3"], // list of in-game screenshot URLs
-  "is_featured": boolean // true if this is a AAA game, highly popular, or highly recommended masterpiece, otherwise false
-}
-IMPORTANT: Please try your best to provide the accurate 'steam_app_id' if the game exists on Steam.
-Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
+      // Build a strict, optimized prompt that strictly asks ONLY for the active fields
+      const prompt = buildFilteredGamePrompt(aiQuery, activeFilter)
 
       let provider: any = undefined;
       let modelOverride = selectedModel;
@@ -220,28 +317,31 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     setAiLoading(false)
   }
 
-  const handleAiApply = async () => {
+  const handleAiApply = async (fields?: CacheFieldSelection) => {
     if (!aiPreview) return
+    const f = fields || aiFilter
     setIsApplying(true)
 
-    setTitle(aiPreview.title || title)
-    if (aiPreview.title) setSlug(slugify(aiPreview.title))
-    if (aiPreview.description) setDescription(aiPreview.description)
-    if (aiPreview.file_size) setFileSize(aiPreview.file_size)
-    if (aiPreview.video_url) setVideoUrl(aiPreview.video_url)
-    if (aiPreview.minimum_requirements) setMinAbout(aiPreview.minimum_requirements)
-    if (aiPreview.recommended_requirements) setRecAbout(aiPreview.recommended_requirements)
-    if (aiPreview.platforms && Array.isArray(aiPreview.platforms) && aiPreview.platforms.length > 0) {
-      setPlatforms(aiPreview.platforms)
-      // Auto-set download link platform: if game is NOT on windows, pick emulator type
-      const hasWindows = aiPreview.platforms.includes('windows')
-      if (!hasWindows) {
-        const consolePriority = ['ps4', 'ps5', 'ps3', 'ps2', 'switch', 'xbox']
-        const mainConsole = consolePriority.find((c: string) => aiPreview.platforms.includes(c))
-        if (mainConsole) {
-          setLinks([{ cloud_name: 'Google Drive', url: '', platform: `emul-${mainConsole}` }])
+    if (f.title && aiPreview.title) setTitle(aiPreview.title)
+    if (f.slug && aiPreview.title) setSlug(slugify(aiPreview.title))
+    if (f.description && aiPreview.description) setDescription(aiPreview.description)
+    if (f.size && aiPreview.file_size) setFileSize(aiPreview.file_size)
+
+    if (f.platform) {
+      if (aiPreview.platforms && Array.isArray(aiPreview.platforms) && aiPreview.platforms.length > 0) {
+        setPlatforms(aiPreview.platforms)
+        // Auto-set download link platform: if game is NOT on windows, pick emulator type
+        const hasWindows = aiPreview.platforms.includes('windows')
+        if (!hasWindows && f.links) {
+          const consolePriority = ['ps4', 'ps5', 'ps3', 'ps2', 'switch', 'xbox']
+          const mainConsole = consolePriority.find((c: string) => aiPreview.platforms.includes(c))
+          if (mainConsole) {
+            setLinks([{ cloud_name: 'Google Drive', url: '', platform: `emul-${mainConsole}` }])
+          }
         }
       }
+      if (aiPreview.minimum_requirements) setMinAbout(aiPreview.minimum_requirements)
+      if (aiPreview.recommended_requirements) setRecAbout(aiPreview.recommended_requirements)
     }
 
     if (aiPreview.is_featured === true) {
@@ -251,63 +351,85 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
     // Fetch real images from SteamGridDB (primary) then fallback to Steam CDN
     let steamCover = ''
     let steamScreenshots: string[] = []
-
     const gameName = aiPreview.title || aiQuery.trim()
     const steamAppId = aiPreview.steam_app_id ? Number(aiPreview.steam_app_id) : undefined
 
-    try {
-      const sgdbImages = await fetchSteamGridDbImages(gameName, steamAppId)
-      if (sgdbImages.cover) steamCover = sgdbImages.cover
-      if (sgdbImages.screenshots.length > 0) steamScreenshots = sgdbImages.screenshots
-    } catch (err) {
-      console.error('SteamGridDB fetch error:', err)
-    }
-
-    // Fallback to Steam CDN if SteamGridDB has no result
-    if (!steamCover && steamAppId) {
-      steamCover = `https://cdn.akamai.steamstatic.com/steam/apps/${steamAppId}/library_600x900.jpg`
-    }
-    if (steamScreenshots.length === 0 && steamAppId) {
+    const shouldFetchImages = Boolean(f.coverImage || f.screenshots)
+    if (shouldFetchImages) {
       try {
-        const steamUrl = `https://store.steampowered.com/api/appdetails?appids=${steamAppId}&filters=screenshots`
-        const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(steamUrl)}`)
-        const steamData = await res.json()
-        const appData = steamData[steamAppId]?.data
-        if (appData?.screenshots?.length > 0) {
-          steamScreenshots = appData.screenshots.slice(0, 8).map((s: any) => s.path_full)
-        }
-      } catch { /* silent */ }
-    }
+        const sgdbImages = await fetchSteamGridDbImages(gameName, steamAppId)
+        if (sgdbImages.cover) steamCover = sgdbImages.cover
+        if (sgdbImages.screenshots.length > 0) steamScreenshots = sgdbImages.screenshots
+      } catch (err) {
+        console.error('SteamGridDB fetch error:', err)
+      }
 
-    if (steamCover) {
-      setCoverImage(steamCover)
-    } else if (aiPreview.cover_image) {
-      setCoverImage(aiPreview.cover_image)
+      // Fallback to Steam CDN if SteamGridDB has no result
+      if (!steamCover && steamAppId) {
+        steamCover = `https://cdn.akamai.steamstatic.com/steam/apps/${steamAppId}/library_600x900.jpg`
+      }
+      if (steamScreenshots.length === 0 && steamAppId) {
+        try {
+          const steamUrl = `https://store.steampowered.com/api/appdetails?appids=${steamAppId}&filters=screenshots`
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 6000)
+          const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(steamUrl)}`, {
+            signal: controller.signal
+          })
+          clearTimeout(timeoutId)
+          if (res.ok) {
+            const steamData = await res.json()
+            const appData = steamData[steamAppId]?.data
+            if (appData?.screenshots?.length > 0) {
+              steamScreenshots = appData.screenshots.slice(0, 8).map((s: any) => s.path_full)
+            }
+          }
+        } catch { /* fail fast */ }
+      }
+
+      if (f.coverImage) {
+        if (steamCover) {
+          setCoverImage(steamCover)
+        } else if (aiPreview.cover_image) {
+          setCoverImage(aiPreview.cover_image)
+        }
+      }
+
+      if (f.screenshots) {
+        if (steamScreenshots.length > 0) {
+          setScreenshots(steamScreenshots)
+        } else if (aiPreview.screenshots && Array.isArray(aiPreview.screenshots) && aiPreview.screenshots.length > 0) {
+          setScreenshots(aiPreview.screenshots)
+        }
+      }
     }
 
     // Fetch real YouTube trailer instead of relying on AI hallucination
     let realTrailer = aiPreview.video_url || ''
-    try {
-      const searchQ = encodeURIComponent(`${gameName} Trailer PS4 PC PS5`)
-      const ytUrl = `https://www.youtube.com/results?search_query=${searchQ}`
-      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(ytUrl)}`)
-      const data = await res.json()
-      const match = data.contents?.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)
-      if (match && match[1]) {
-        realTrailer = `https://www.youtube.com/watch?v=${match[1]}`
-      }
-    } catch (err) { console.error('YT Fetch Error', err) }
+    if (f.videoTrailer) {
+      try {
+        const searchQ = encodeURIComponent(`${gameName} Trailer PS4 PC PS5`)
+        const ytUrl = `https://www.youtube.com/results?search_query=${searchQ}`
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 6000)
+        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(ytUrl)}`, {
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+        if (res.ok) {
+          const data = await res.json()
+          const match = data.contents?.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)
+          if (match && match[1]) {
+            realTrailer = `https://www.youtube.com/watch?v=${match[1]}`
+          }
+        }
+      } catch (err) { /* fail fast */ }
 
-    if (realTrailer) setVideoUrl(realTrailer)
-
-    if (steamScreenshots.length > 0) {
-      setScreenshots(steamScreenshots)
-    } else if (aiPreview.screenshots && Array.isArray(aiPreview.screenshots) && aiPreview.screenshots.length > 0) {
-      setScreenshots(aiPreview.screenshots)
+      if (realTrailer) setVideoUrl(realTrailer)
     }
 
     // Auto-match or create categories from genres
-    if (aiPreview.genres && aiPreview.genres.length > 0) {
+    if (f.genres && aiPreview.genres && aiPreview.genres.length > 0) {
       const newCatIds: string[] = []
       const updatedCats = [...categories]
       for (const genreName of aiPreview.genres) {
@@ -354,17 +476,18 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
   }
 
   const handleApplyCache = async (record: GameGenerationRecord, fields: CacheFieldSelection) => {
-    if (fields.title) { setTitle(record.game_title); setSlug(slugify(record.game_title)) }
+    if (fields.title && record.game_title) setTitle(record.game_title)
+    if (fields.slug && record.game_title) setSlug(slugify(record.game_title))
     if (fields.description && record.description) setDescription(record.description)
     if (fields.size && record.file_size) setFileSize(record.file_size)
-    if (fields.images) {
-      if (record.cover_image) setCoverImage(record.cover_image)
-      if (record.screenshots?.length) setScreenshots(record.screenshots)
+    if (fields.videoTrailer && record.video_url) setVideoUrl(record.video_url)
+    if (fields.coverImage && record.cover_image) setCoverImage(record.cover_image)
+    if (fields.screenshots && record.screenshots?.length) setScreenshots(record.screenshots)
+    if (fields.platform) {
+      if (record.platforms?.length) setPlatforms(record.platforms)
+      if (record.minimum_requirements) setMinAbout(record.minimum_requirements)
+      if (record.recommended_requirements) setRecAbout(record.recommended_requirements)
     }
-    if (fields.platform && record.platforms?.length) setPlatforms(record.platforms)
-    if (fields.size && record.minimum_requirements) setMinAbout(record.minimum_requirements)
-    if (fields.size && record.recommended_requirements) setRecAbout(record.recommended_requirements)
-    if (record.video_url) setVideoUrl(record.video_url)
     if (record.is_featured) setIsFeatured(true)
 
     // Restore cached download links if present
@@ -548,7 +671,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         if (res.ok) {
           const steamData = await res.json()
           const appData = steamData[appId]?.data
-          
+
           if (appData) {
             if (screenshots.length === 0 && appData.screenshots?.length > 0) {
               screenshots = appData.screenshots.map((s: any) => s.path_full)
@@ -611,6 +734,26 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
         alert('ไม่พบ URL รูปภาพใน Clipboard')
       }
     } catch { alert('ไม่สามารถอ่าน Clipboard ได้') }
+  }
+
+  const handleSearchWebCover = () => {
+    const term = (title || aiQuery).trim()
+    if (!term) {
+      alert('กรุณากรอกชื่อเกม (Title) ก่อนค้นหารูปภาพ')
+      return
+    }
+    const searchUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(term + ' game cover')}`
+    window.open(searchUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleSearchWebScreenshots = () => {
+    const term = (title || aiQuery).trim()
+    if (!term) {
+      alert('กรุณากรอกชื่อเกม (Title) ก่อนค้นหารูปภาพ')
+      return
+    }
+    const searchUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(term + ' in-game screenshot')}`
+    window.open(searchUrl, '_blank', 'noopener,noreferrer')
   }
 
   // Cover — stage locally only
@@ -720,6 +863,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
       }
 
       clearDraft()
+      sessionStorage.removeItem('la_game_add_active_session')
       setSaveMsg({ type: 'success', text: 'Game saved successfully!' })
       setTimeout(() => navigate('/ap-admin/games'), 1200)
     } catch (e: any) {
@@ -741,12 +885,116 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
       <Card>
         {saveMsg && <Alert $type={saveMsg.type}>{saveMsg.type === 'success' ? <CheckCircle size={15} /> : <AlertCircle size={15} />}{saveMsg.text}</Alert>}
 
+        {/* ── Restore Draft Banner ─────────────────────────────────── */}
+        {hasDraft && savedDraft && (
+          <DraftBanner>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, paddingRight: 24, minWidth: 0 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: 'linear-gradient(135deg, #7c3aed, #06b6d4)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0, boxShadow: '0 3px 10px rgba(124,58,237,0.35)',
+                marginTop: 2
+              }}>
+                <RotateCcw size={17} color="#fff" />
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>
+                    Unsaved Draft Available
+                  </span>
+                  {savedDraft.title && (
+                    <span style={{
+                      background: 'rgba(255,255,255,0.1)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      padding: '1px 6px', borderRadius: 5,
+                      color: '#38bdf8', fontSize: 11, fontWeight: 600,
+                      maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                    }}>
+                      "{savedDraft.title}"
+                    </span>
+                  )}
+                  {savedDraft.fileSize && (
+                    <span style={{ color: 'rgba(148,163,184,0.8)', fontSize: 11, fontWeight: 500 }}>
+                      ({savedDraft.fileSize})
+                    </span>
+                  )}
+                </div>
+                <div style={{ color: 'rgba(148,163,184,0.7)', fontSize: 11, marginTop: 3, lineHeight: 1.4 }}>
+                  A saved draft exists in this browser. Click Restore to resume, or discard to start clean.
+                </div>
+              </div>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(105px, 1fr))',
+              gap: 8,
+              width: '100%'
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  restoreDraft()
+                  sessionStorage.setItem('la_game_add_active_session', 'active')
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  padding: '7px 12px',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  border: 'none', borderRadius: 8,
+                  color: '#fff', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', boxShadow: '0 2px 8px rgba(16,185,129,0.3)',
+                  transition: 'all 0.2s', whiteSpace: 'nowrap'
+                }}
+              >
+                <RotateCcw size={13} /> Restore Draft
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  clearDraft()
+                  sessionStorage.removeItem('la_game_add_active_session')
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  padding: '7px 10px',
+                  background: 'rgba(239,68,68,0.12)',
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  borderRadius: 8,
+                  color: '#f87171', fontSize: 12, fontWeight: 500,
+                  cursor: 'pointer', transition: 'all 0.2s', whiteSpace: 'nowrap'
+                }}
+                title="Discard this draft permanently"
+              >
+                <Trash2 size={13} /> Discard
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={dismissDraftPrompt}
+              style={{
+                position: 'absolute', top: 10, right: 10,
+                padding: '4px', background: 'transparent', border: 'none',
+                color: 'rgba(148,163,184,0.6)', cursor: 'pointer', borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}
+              title="Dismiss banner"
+            >
+              <X size={15} />
+            </button>
+          </DraftBanner>
+        )}
+
         {/* ── Gemini AI Auto-Fill ──────────────────────────────── */}
         <AiAutoFillCard
           aiQuery={aiQuery} setAiQuery={setAiQuery}
           selectedModel={selectedModel} setSelectedModel={setSelectedModel}
           aiLoading={aiLoading} isApplying={isApplying} aiError={aiError} aiPreview={aiPreview}
           onGenerate={handleAiGenerate} onApply={handleAiApply} onCancel={() => setAiPreview(null)}
+          onFilterChange={setAiFilter}
           onApplyCache={handleApplyCache}
         />
 
@@ -845,31 +1093,55 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
           )}
         </Field>
         <Field>
-          <Label>Cover Image URL (or Upload)</Label>
+          <Label>Cover Image (URL or Upload)</Label>
           <FetchRow>
-            <Input placeholder="https://..." value={coverImage} onChange={e => { setCoverImage(e.target.value); setPendingCoverFile(null) }} style={{ flex: 1 }} />
-            <FetchBtn onClick={handlePasteCover} style={{ padding: '10px 14px', background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)' }} title="วาง URL จาก Clipboard">
-              📋 วาง
-            </FetchBtn>
-            <UploadBtn>
-              <Image size={14} /> เลือกไฟล์
-              {pendingCoverFile && <span style={{ fontSize: 10, background: '#f59e0b', color: '#000', borderRadius: 4, padding: '1px 5px', marginLeft: 4 }}>Staged</span>}
-              <input type="file" accept="image/*" hidden onChange={handleUploadCover} />
-            </UploadBtn>
+            <Input
+              placeholder="https://..."
+              value={coverImage}
+              onChange={e => { setCoverImage(e.target.value); setPendingCoverFile(null) }}
+              style={{ flex: 1, minWidth: 0, width: '100%' }}
+            />
+            <FetchBtnGroup>
+              <FetchBtn onClick={handlePasteCover} style={{ padding: '8px 12px', background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4' }} title="วาง URL จาก Clipboard">
+                📋 วาง
+              </FetchBtn>
+              <WebSearchBtn type="button" onClick={handleSearchWebCover} title="เปิดค้นหารูปหน้าปกจาก Google Images ในแท็บใหม่">
+                <Globe size={13} /> ค้นหา
+              </WebSearchBtn>
+              <CoverUploadBtn title="Upload Cover Image (เลือกไฟล์รูปหน้าปก)">
+                <Image size={13} />
+                เลือกไฟล์
+                {pendingCoverFile && <span style={{ fontSize: 9, background: '#f59e0b', color: '#000', borderRadius: 4, padding: '1px 4px', fontWeight: 700 }}>●</span>}
+                <input type="file" accept="image/*" hidden onChange={handleUploadCover} />
+              </CoverUploadBtn>
+            </FetchBtnGroup>
           </FetchRow>
-          <CoverImagePicker
-            src={coverImage}
-            orientation={coverOrientation}
-            onOrientationChange={setCoverOrientation}
-          />
+          <div style={{ marginTop: 10 }}>
+            <CoverImagePicker
+              src={coverImage}
+              orientation={coverOrientation}
+              onOrientationChange={setCoverOrientation}
+            />
+          </div>
         </Field>
         <Field>
           <Label>Screenshots (URL or Upload)</Label>
           <FetchRow>
-            <Input placeholder="Screenshot URL... (กด Enter เพื่อเพิ่ม)" value={newScreenshot} onChange={e => setNewScreenshot(e.target.value)} onKeyDown={e => e.key === 'Enter' && addScreenshot()} style={{ flex: 1 }} />
-            <FetchBtn onClick={handlePasteScreenshot} style={{ padding: '10px 14px', background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4' }} title="วาง URL จาก Clipboard">
-              📋 วาง
-            </FetchBtn>
+            <Input
+              placeholder="Screenshot URL... (กด Enter เพื่อเพิ่ม)"
+              value={newScreenshot}
+              onChange={e => setNewScreenshot(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addScreenshot()}
+              style={{ flex: 1, minWidth: 0, width: '100%' }}
+            />
+            <FetchBtnGroup>
+              <FetchBtn onClick={handlePasteScreenshot} style={{ padding: '8px 14px', background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.4)', color: '#06b6d4' }} title="วาง URL จาก Clipboard">
+                📋 วาง
+              </FetchBtn>
+              <WebSearchBtn type="button" onClick={handleSearchWebScreenshots} title="เปิดค้นหารูป Screenshot จาก Google Images ในแท็บใหม่">
+                <Globe size={13} /> ค้นหา
+              </WebSearchBtn>
+            </FetchBtnGroup>
           </FetchRow>
           <ScreenshotSorter
             screenshots={screenshots}
@@ -947,6 +1219,7 @@ Return ONLY the raw JSON object. No markdown, no code blocks, no explanation.`
           <button
             onClick={() => {
               clearDraft()
+              sessionStorage.removeItem('la_game_add_active_session')
               setTitle(''); setSlug(''); setDescription(''); setFileSize(''); setVideoUrl('')
               setCoverImage(''); setScreenshots([]); setCategoryIds([]); setIsFeatured(false)
               setIsComingSoon(false); setPlatforms(['windows']); setMinAbout(''); setRecAbout('')

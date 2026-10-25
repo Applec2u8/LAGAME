@@ -7,7 +7,7 @@ import type { ChatMessage } from '../../lib/chatService'
 import { getActiveModelInfo } from '../../lib/aiProvider'
 import { detectPlatform } from '../../lib/analytics'
 import { useLanguage } from '../../lib/i18n/LanguageContext'
-import { getSupportedAudioMimeType, stopMediaStreamTracks } from '../../lib/audioUtils'
+import { getSupportedAudioMimeType, stopMediaStreamTracks, getAudioFileExtension, requestMicrophoneAccess } from '../../lib/audioUtils'
 
 // ── Keyframes ─────────────────────────────────────────────────────
 const slideUp = keyframes`from { opacity: 0; transform: translateY(24px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); }`
@@ -748,7 +748,8 @@ export default function ChatBot() {
       }
       if (!uploadFile) continue
       const isAudio = att.type === 'audio'
-      const ext = att.blob?.type?.includes('mp4') || att.blob?.type?.includes('aac') ? 'mp4' : (att.file?.name?.split('.').pop() || 'webm')
+      const audioBlobMime = att.blob?.type || ''
+      const ext = att.file ? (att.file.name.split('.').pop() || 'webm') : getAudioFileExtension(audioBlobMime)
       const uploadName = att.file?.name ?? `voice_${Date.now()}.${ext}`
 
       const fileExt = uploadName.split('.').pop()
@@ -903,17 +904,24 @@ export default function ChatBot() {
     // 1. Force release any lingering stream/recorder to prevent audio session locks on mobile
     cleanupSupportRecording()
 
+    // 2. Request microphone via permission-aware helper (must be called from a user-gesture)
+    const stream = await requestMicrophoneAccess(true)
+    if (!stream) {
+      alert('Microphone access denied. Please allow microphone permissions in your browser settings and try again.')
+      return
+    }
+
     try {
-      // 2. Request a fresh stream from browser
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       supportMediaStreamRef.current = stream
 
       const mimeType = getSupportedAudioMimeType()
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      const recorderOptions = mimeType ? { mimeType } : {}
+      const recorder = new MediaRecorder(stream, recorderOptions)
       supportMediaRecorderRef.current = recorder
       supportAudioChunksRef.current = []
       setSupportRecordingTime(0)
 
+      // Collect data in timesliced chunks — helps iOS Safari flush data reliably
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           supportAudioChunksRef.current.push(e.data)
@@ -926,23 +934,25 @@ export default function ChatBot() {
             const actualMime = recorder.mimeType || mimeType || 'audio/webm'
             const audioBlob = new Blob(supportAudioChunksRef.current, { type: actualMime })
             if (audioBlob.size > 0) {
-              const url = URL.createObjectURL(audioBlob)
-              setSupportAttachments(prev => [...prev, {
-                id: Math.random().toString(36).slice(2, 11),
-                blob: audioBlob,
-                url,
-                type: 'audio'
-              }])
+              const blobUrl = URL.createObjectURL(audioBlob)
+              // Use functional state update to guarantee React flushes on mobile
+              setSupportAttachments(prev => [
+                ...prev,
+                {
+                  id: Math.random().toString(36).slice(2, 11),
+                  blob: audioBlob,
+                  url: blobUrl,
+                  type: 'audio' as const,
+                }
+              ])
             }
           }
         } catch (err) {
           console.error('Error assembling support audio blob:', err)
         } finally {
-          // Explicitly release all media stream tracks on stop
-          if (supportMediaStreamRef.current) {
-            stopMediaStreamTracks(supportMediaStreamRef.current)
-            supportMediaStreamRef.current = null
-          }
+          // Explicitly release all media stream tracks on stop to free the mic hardware
+          stopMediaStreamTracks(supportMediaStreamRef.current)
+          supportMediaStreamRef.current = null
           stopMediaStreamTracks(stream)
           supportMediaRecorderRef.current = null
           supportAudioChunksRef.current = []
@@ -954,16 +964,14 @@ export default function ChatBot() {
         cleanupSupportRecording()
       }
 
-      recorder.start()
+      // Use 250ms timeslice so iOS Safari fires ondataavailable continuously
+      recorder.start(250)
       setIsSupportRecording(true)
       supportTimerRef.current = window.setInterval(() => setSupportRecordingTime(prev => prev + 1), 1000)
     } catch (e: any) {
+      stopMediaStreamTracks(stream)
       cleanupSupportRecording()
-      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-        alert('Microphone access denied. Please allow microphone permissions in your browser.')
-      } else {
-        alert('Could not access microphone: ' + (e.message || 'Device unavailable'))
-      }
+      alert('Could not start recording: ' + (e.message || 'Device unavailable'))
     }
   }, [supportAttachments.length, cleanupSupportRecording])
 
@@ -1111,8 +1119,12 @@ export default function ChatBot() {
     }
   }
 
+  // Track whether recognition is intentionally stopping to avoid stale onend restarts
+  const isStoppingRecognitionRef = useRef(false)
+
   // Clean up speech recognition instance and timer safely
   const cleanupAiSpeechRecognition = useCallback(() => {
+    isStoppingRecognitionRef.current = true
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
@@ -1136,6 +1148,7 @@ export default function ChatBot() {
   }, [])
 
   const stopAiSpeechRecognition = useCallback((saveTranscript = true) => {
+    isStoppingRecognitionRef.current = true
     if (timerRef.current) {
       clearInterval(timerRef.current)
       timerRef.current = null
@@ -1158,22 +1171,25 @@ export default function ChatBot() {
     if (saveTranscript && speechTranscriptRef.current) {
       const finalVal = speechTranscriptRef.current.trim()
       if (finalVal) {
-        setAiInput(finalVal)
+        // Write directly to DOM FIRST (bypasses React mobile focus lock)
         if (aiTextRef.current) {
           aiTextRef.current.value = finalVal
           aiTextRef.current.style.height = 'auto'
           aiTextRef.current.style.height = Math.min(aiTextRef.current.scrollHeight, 200) + 'px'
         }
+        // Then sync React state
+        setAiInput(finalVal)
       }
     }
 
+    // Restore cursor focus after brief delay (allows React state to settle on mobile)
     setTimeout(() => {
       if (aiTextRef.current) {
         aiTextRef.current.focus()
         const len = aiTextRef.current.value.length
-        aiTextRef.current.setSelectionRange(len, len)
+        try { aiTextRef.current.setSelectionRange(len, len) } catch {}
       }
-    }, 60)
+    }, 80)
   }, [])
 
   const startAiSpeechRecognition = useCallback(() => {
@@ -1183,14 +1199,20 @@ export default function ChatBot() {
       return
     }
 
-    // Always clean up prior recognition or audio stream instances before starting
+    // Clean up any prior recognition instance before starting a fresh one
     cleanupAiSpeechRecognition()
+    // Reset the intentional-stop guard so onend can fire normally
+    isStoppingRecognitionRef.current = false
 
     try {
       const recognition = new SpeechRecognition()
-      recognition.continuous = true
+      // iOS Safari webkitSpeechRecognition does NOT support continuous=true reliably.
+      // We use continuous on Chrome/Android but disable it on iOS to avoid stall.
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      recognition.continuous = !isIOS
       recognition.interimResults = true
-      recognition.lang = 'th-TH' // Default to Thai
+      recognition.lang = 'th-TH'
+      recognition.maxAlternatives = 1
 
       let initialTranscript = aiInput
       if (initialTranscript && !initialTranscript.endsWith(' ')) {
@@ -1215,26 +1237,42 @@ export default function ChatBot() {
 
         const fullText = speechTranscriptRef.current + interimTranscript
 
-        // 1. Direct state binding on speech result
-        setAiInput(fullText)
-
-        // 2. Direct DOM value binding for mobile WebKit & Blink engines to immediately reflect speech
+        // Write to DOM first (bypasses React mobile focus lock for instant feedback)
         if (aiTextRef.current) {
           aiTextRef.current.value = fullText
           aiTextRef.current.style.height = 'auto'
           aiTextRef.current.style.height = Math.min(aiTextRef.current.scrollHeight, 200) + 'px'
         }
+        // Sync React state
+        setAiInput(fullText)
       }
 
       recognition.onerror = (e: any) => {
+        // 'no-speech' is benign on iOS — ignore it
+        if (e.error === 'no-speech') return
         console.warn('Speech recognition error:', e.error)
-        stopAiSpeechRecognition(true)
         if (e.error === 'not-allowed') {
           alert('Microphone access denied. Please allow microphone permissions in your browser.')
         }
+        stopAiSpeechRecognition(true)
       }
 
       recognition.onend = () => {
+        // On iOS, recognition fires onend after each utterance even in continuous mode.
+        // If we didn't intentionally stop it, restart it to simulate continuous recording.
+        if (!isStoppingRecognitionRef.current && isRecording) {
+          try {
+            // Brief pause then restart to avoid iOS session lock
+            setTimeout(() => {
+              if (!isStoppingRecognitionRef.current && recognitionRef.current === recognition) {
+                try { recognition.start() } catch { stopAiSpeechRecognition(true) }
+              }
+            }, 150)
+            return
+          } catch {
+            // fall through to stop
+          }
+        }
         stopAiSpeechRecognition(true)
       }
 
@@ -1248,7 +1286,7 @@ export default function ChatBot() {
       cleanupAiSpeechRecognition()
       alert('Could not start speech recognition: ' + (err.message || 'Please try again.'))
     }
-  }, [aiInput, t, cleanupAiSpeechRecognition, stopAiSpeechRecognition])
+  }, [aiInput, t, cleanupAiSpeechRecognition, stopAiSpeechRecognition, isRecording])
 
   const toggleRecording = useCallback(() => {
     if (isRecording) {

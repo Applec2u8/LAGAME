@@ -22,12 +22,20 @@ export const AdminPage = styled.div<{ $maxWidth?: string }>`
 export const PageHeader = styled.div`
   display: flex; align-items: flex-start; justify-content: space-between;
   flex-wrap: wrap; gap: 16px; margin-bottom: 32px;
+  @media (max-width: 640px) {
+    margin-bottom: 20px;
+    gap: 12px;
+  }
 `
 
 export const PageTitle = styled.h1`
   font-family: 'Noto Sans Lao', sans-serif; font-size: 28px; font-weight: 800;
   color: #fff; margin: 0; display: flex; align-items: center; gap: 12px;
   letter-spacing: -0.5px;
+  @media (max-width: 640px) {
+    font-size: 20px;
+    gap: 8px;
+  }
   span { 
     font-size: 14px; font-weight: 500; font-family: 'Noto Sans Lao', sans-serif;
     color: rgba(148,163,184,0.6); letter-spacing: 0;
@@ -46,6 +54,10 @@ export const Card = styled.div`
   border-radius: 20px;
   padding: 28px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  @media (max-width: 640px) {
+    padding: 16px 12px;
+    border-radius: 14px;
+  }
 `
 
 export const CardHeader = styled.div`
@@ -120,6 +132,12 @@ const btnBase = `
   cursor: pointer; transition: all 0.2s; white-space: nowrap;
   font-family: 'Noto Sans Lao', sans-serif;
   &:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+  @media (max-width: 640px) {
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    gap: 6px;
+  }
 `
 
 export const PrimaryBtn = styled.button`
@@ -181,6 +199,11 @@ export const BackBtn = styled.button`
   color: rgba(148,163,184,0.7); font-size: 13px; border-radius: 10px;
   margin-bottom: 24px;
   &:hover { color: #fff; background: rgba(255,255,255,0.08); }
+  @media (max-width: 640px) {
+    padding: 6px 11px;
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
 `
 
 // ── Table ─────────────────────────────────────────────────────────

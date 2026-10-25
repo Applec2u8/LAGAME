@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import styled, { keyframes, css } from 'styled-components'
 import { MessageSquare, Send, RefreshCw, Trash2, Clock, Paperclip, File, Mic, Square, X, Copy, Reply, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
-import { getSupportedAudioMimeType, stopMediaStreamTracks } from '../../../lib/audioUtils'
+import { getSupportedAudioMimeType, stopMediaStreamTracks, getAudioFileExtension, requestMicrophoneAccess } from '../../../lib/audioUtils'
 
 // ── Types ─────────────────────────────────────────────────────────
 interface SupportSession {
@@ -360,17 +360,24 @@ export default function AdminSupport() {
     // 1. Force release any lingering stream/recorder to prevent audio session locks on mobile
     cleanupAudioRecording()
 
+    // 2. Request microphone via permission-aware helper (must be called from a user-gesture)
+    const stream = await requestMicrophoneAccess(true)
+    if (!stream) {
+      alert('ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณาอนุญาตการเข้าถึงไมโครโฟนในการตั้งค่าเบราว์เซอร์แล้วลองใหม่')
+      return
+    }
+
     try {
-      // 2. Request a fresh stream from browser
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       mediaStreamRef.current = stream
 
       const mimeType = getSupportedAudioMimeType()
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      const recorderOptions = mimeType ? { mimeType } : {}
+      const recorder = new MediaRecorder(stream, recorderOptions)
       mediaRecorderRef.current = recorder
       audioChunksRef.current = []
       setRecordingTime(0)
 
+      // Collect data in timesliced chunks — helps iOS Safari flush data reliably
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           audioChunksRef.current.push(e.data)
@@ -383,23 +390,25 @@ export default function AdminSupport() {
             const actualMime = recorder.mimeType || mimeType || 'audio/webm'
             const audioBlob = new Blob(audioChunksRef.current, { type: actualMime })
             if (audioBlob.size > 0) {
-              const url = URL.createObjectURL(audioBlob)
-              setAttachments(prev => [...prev, {
-                id: Math.random().toString(36).slice(2, 11),
-                blob: audioBlob,
-                url,
-                type: 'audio'
-              }])
+              const blobUrl = URL.createObjectURL(audioBlob)
+              // Functional state update ensures React flushes correctly on mobile
+              setAttachments(prev => [
+                ...prev,
+                {
+                  id: Math.random().toString(36).slice(2, 11),
+                  blob: audioBlob,
+                  url: blobUrl,
+                  type: 'audio' as const,
+                }
+              ])
             }
           }
         } catch (err) {
           console.error('Error assembling audio blob:', err)
         } finally {
           // Explicitly release all media stream tracks on stop
-          if (mediaStreamRef.current) {
-            stopMediaStreamTracks(mediaStreamRef.current)
-            mediaStreamRef.current = null
-          }
+          stopMediaStreamTracks(mediaStreamRef.current)
+          mediaStreamRef.current = null
           stopMediaStreamTracks(stream)
           mediaRecorderRef.current = null
           audioChunksRef.current = []
@@ -411,16 +420,14 @@ export default function AdminSupport() {
         cleanupAudioRecording()
       }
 
-      recorder.start()
+      // Use 250ms timeslice so iOS Safari fires ondataavailable continuously
+      recorder.start(250)
       setIsRecording(true)
       timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000)
     } catch (e: any) {
+      stopMediaStreamTracks(stream)
       cleanupAudioRecording()
-      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-        alert('ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณาอนุญาตการเข้าถึงไมโครโฟนในเบราว์เซอร์')
-      } else {
-        alert('ไม่สามารถเปิดใช้งานไมโครโฟนได้: ' + (e.message || 'อุปกรณ์ไม่พร้อมใช้งาน'))
-      }
+      alert('ไม่สามารถเริ่มการบันทึกได้: ' + (e.message || 'อุปกรณ์ไม่พร้อมใช้งาน'))
     }
   }, [attachments.length, cleanupAudioRecording])
 
@@ -625,7 +632,8 @@ export default function AdminSupport() {
       }
       if (!uploadFile) continue
       const isAudio = att.type === 'audio'
-      const ext = att.blob?.type?.includes('mp4') || att.blob?.type?.includes('aac') ? 'mp4' : (att.file?.name?.split('.').pop() || 'webm')
+      const audioBlobMime = att.blob?.type || ''
+      const ext = att.file ? (att.file.name.split('.').pop() || 'webm') : getAudioFileExtension(audioBlobMime)
       const uploadName = att.file?.name ?? `voice_${Date.now()}.${ext}`
 
       const fileExt = uploadName.split('.').pop()

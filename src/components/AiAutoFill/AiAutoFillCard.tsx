@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import styled, { keyframes, css } from 'styled-components'
-import { Bot, Sparkles, Loader2, Wand2, Check, Zap, Database, RefreshCw, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Bot, Sparkles, Loader2, Wand2, Check, Zap, Database, RefreshCw, X, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react'
 import { Input, Select } from '../../pages/Admin/adminStyles'
 import { getAvailableKeys } from '../../lib/aiProvider'
 import { searchGameGenerations } from '../../lib/gameGenerations'
@@ -53,25 +53,97 @@ const AiInputRow = styled.div`
 `
 const AiOptionRow = styled.div`
   display: flex; gap: 8px; align-items: center;
-  @media (max-width: 640px) { width: 100%; flex-wrap: nowrap; }
+  @media (max-width: 640px) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+    & > :first-child {
+      grid-column: 1 / -1;
+      width: 100%;
+      min-width: 0 !important;
+    }
+  }
 `
 const AiGenerateBtn = styled.button<{ $loading?: boolean }>`
   flex-shrink: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 9px 12px;
+  padding: 9px 14px;
   background: ${p => p.$loading ? 'rgba(124,58,237,0.3)' : 'linear-gradient(135deg, #7c3aed, #a855f7)'};
   border: none; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 700;
   cursor: ${p => p.$loading ? 'not-allowed' : 'pointer'};
   white-space: nowrap; font-family: 'Noto Sans Lao', sans-serif; transition: all 0.2s;
   ${p => p.$loading ? '' : '&:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(124,58,237,0.4); }'}
   animation: ${p => p.$loading ? glowPulse : 'none'} 1.5s ease-in-out infinite;
-  min-width: 100px;
-  @media (max-width: 400px) { padding: 9px 8px; font-size: 12px; }
+  min-width: 90px;
+  @media (max-width: 640px) {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    gap: 5px;
+    border-radius: 8px;
+  }
+`
+const FilterToggleBtn = styled.button<{ $active?: boolean }>`
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 12px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  cursor: pointer; white-space: nowrap; transition: all 0.2s;
+  background: ${p => p.$active ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.12)'};
+  border: 1px solid ${p => p.$active ? 'rgba(124,58,237,0.8)' : 'rgba(124,58,237,0.35)'};
+  color: ${p => p.$active ? '#e9d5ff' : '#cbd5e1'};
+  &:hover { background: rgba(124,58,237,0.28); color: #fff; border-color: rgba(124,58,237,0.7); }
+  @media (max-width: 640px) {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    gap: 4px;
+    border-radius: 8px;
+  }
+`
+const FilterPanel = styled.div<{ $open: boolean }>`
+  overflow: hidden;
+  ${p => p.$open
+    ? css`animation: ${slideDown} 0.22s ease forwards; max-height: 9999px;`
+    : css`animation: ${slideUp} 0.18s ease forwards; pointer-events: none; max-height: 0;`
+  }
+`
+const FilterGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(124,58,237,0.04);
+  border: 1px solid rgba(124,58,237,0.18);
+  border-radius: 10px;
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 8px;
+    gap: 4px;
+  }
+  @media (max-width: 360px) {
+    grid-template-columns: 1fr;
+  }
+`
+const FilterCheckItem = styled.label`
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px; border-radius: 7px; cursor: pointer;
+  font-size: 12px; color: rgba(148,163,184,0.8); font-weight: 600;
+  transition: background 0.15s;
+  &:hover { background: rgba(124,58,237,0.1); color: #e2e8f0; }
+  @media (max-width: 640px) {
+    padding: 5px 6px;
+    font-size: 11px;
+    gap: 5px;
+  }
 `
 const AiResultCard = styled.div`
   margin-top: 14px; padding: 16px;
   background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(6,182,212,0.05));
   border: 1px solid rgba(124,58,237,0.25); border-radius: 12px; font-size: 13px;
   color: rgba(148,163,184,0.8);
+  @media (max-width: 640px) {
+    padding: 12px;
+  }
 `
 const AiResultRow = styled.div`display: flex; gap: 8px; margin-bottom: 6px; align-items: flex-start;`
 const AiResultKey = styled.span`color: #a855f7; font-weight: 700; min-width: 90px; flex-shrink: 0;`
@@ -83,12 +155,22 @@ const ApplyBtn = styled.button<{ $loading?: boolean }>`
   display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px;
   transition: all 0.2s;
   ${p => p.$loading ? '' : '&:hover { background: #059669; transform: translateY(-1px); }'}
+  @media (max-width: 640px) {
+    padding: 9px 12px;
+    font-size: 12px;
+    margin-top: 12px;
+  }
 `
 const CancelBtn = styled.button`
   width: 100%; margin-top: 8px; padding: 10px;
   background: transparent; color: #94a3b8; border: 1px solid rgba(148,163,184,0.2);
   border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px;
   &:hover { background: rgba(148,163,184,0.1); color: #fff; }
+  @media (max-width: 640px) {
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-top: 6px;
+  }
 `
 
 // Autocomplete
@@ -201,17 +283,32 @@ const ExpandBtn = styled.button`
 
 // ─── Field keys type ──────────────────────────────────────────────────────────
 
-type FieldKey = 'title' | 'genres' | 'platform' | 'size' | 'description' | 'images' | 'links'
+export type FieldKey =
+  | 'title'
+  | 'size'
+  | 'slug'
+  | 'genres'
+  | 'description'
+  | 'platform'
+  | 'videoTrailer'
+  | 'coverImage'
+  | 'screenshots'
+  | 'links'
 
 export interface CacheFieldSelection {
   title: boolean
-  genres: boolean
-  platform: boolean
   size: boolean
+  slug: boolean
+  genres: boolean
   description: boolean
-  images: boolean
-  links: boolean
+  platform: boolean
+  videoTrailer: boolean
+  coverImage: boolean
+  screenshots: boolean
+  links?: boolean
 }
+
+export const AI_FILTER_STORAGE_KEY = 'la_game_ai_filter_prefs'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -224,43 +321,77 @@ interface Props {
   isApplying: boolean
   aiError: string
   aiPreview: any
-  onGenerate: () => void
-  onApply: () => void
+  /** Called with the active field selection so parent can filter what AI generates */
+  onGenerate: (fields: CacheFieldSelection) => void
+  onApply: (fields?: CacheFieldSelection) => void
   onCancel: () => void
+  /** Called when user toggles any field in the filter */
+  onFilterChange?: (fields: CacheFieldSelection) => void
   /** Called when user selects a cached record — parent should apply it with field selection */
   onApplyCache?: (record: GameGenerationRecord, fields: CacheFieldSelection) => void
 }
 
 interface KeyOption { value: string; label: string; provider: 'gemini' | 'groq' }
 
-const DEFAULT_FIELDS: CacheFieldSelection = {
-  title: true, genres: true, platform: true,
-  size: true, description: true, images: true, links: true,
+export const DEFAULT_FIELDS: CacheFieldSelection = {
+  title: true,
+  size: true,
+  slug: true,
+  genres: true,
+  description: true,
+  platform: true,
+  videoTrailer: true,
+  coverImage: true,
+  screenshots: true,
+  links: true,
 }
 
-const FIELD_LABELS: { key: FieldKey; emoji: string; label: string }[] = [
-  { key: 'title',       emoji: '🎮', label: 'Title' },
-  { key: 'genres',      emoji: '🏷️', label: 'Genres' },
-  { key: 'platform',    emoji: '🕹️', label: 'Platform' },
-  { key: 'size',        emoji: '💾', label: 'File Size' },
-  { key: 'description', emoji: '📝', label: 'Description' },
-  { key: 'images',      emoji: '🖼️', label: 'Cover & Screenshots' },
-  { key: 'links',       emoji: '🔗', label: 'Download Links' },
+export function loadSavedAiFilter(): CacheFieldSelection {
+  try {
+    const raw = localStorage.getItem(AI_FILTER_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      delete parsed.images // remove legacy key
+      return { ...DEFAULT_FIELDS, ...parsed }
+    }
+  } catch (e) {
+    console.warn('Failed to load saved AI filter preferences', e)
+  }
+  return DEFAULT_FIELDS
+}
+
+export const FIELD_LABELS: { key: FieldKey; emoji: string; label: string }[] = [
+  { key: 'title',        emoji: '🎮', label: 'Title (Game title)' },
+  { key: 'size',         emoji: '💾', label: 'File Size (Storage size)' },
+  { key: 'slug',         emoji: '🔤', label: 'Slug (URL slug)' },
+  { key: 'genres',       emoji: '🏷️', label: 'Category (Game category)' },
+  { key: 'description',  emoji: '📝', label: 'Description (Game description)' },
+  { key: 'platform',     emoji: '🕹️', label: 'Support Platforms' },
+  { key: 'videoTrailer', emoji: '🎬', label: 'YouTube Video Trailer' },
+  { key: 'coverImage',   emoji: '🖼️', label: 'Cover Image (Official)' },
+  { key: 'screenshots',  emoji: '📸', label: 'Screenshots / Previews' },
+  { key: 'links',        emoji: '🔗', label: 'Download Links' },
 ]
 
 // ─── Expandable content line limits ─────────────────────────────────────────
-const COLLAPSIBLE_FIELDS: FieldKey[] = ['description', 'title', 'genres', 'platform']
+const COLLAPSIBLE_FIELDS: FieldKey[] = ['description', 'title', 'genres', 'platform', 'slug']
+
+// helper: derive slug from title (same logic as the form)
+const slugify = (str: string) => str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 // ─── Full value (not truncated) for display ───────────────────────────────────
 const getFullValue = (key: FieldKey, record: GameGenerationRecord): string => {
   switch (key) {
-    case 'title':       return record.game_title
-    case 'genres':      return (record.genres || []).join(', ') || '—'
-    case 'platform':    return (record.platforms || []).join(', ').toUpperCase() || '—'
-    case 'size':        return record.file_size || '—'
-    case 'description': return record.description || '—'
-    case 'images':      return record.cover_image ? `✓ Cover + ${record.screenshots?.length || 0} screenshots` : '—'
-    case 'links':       return record.cached_download_links?.length
+    case 'title':        return record.game_title || '—'
+    case 'size':         return record.file_size || '—'
+    case 'slug':         return slugify(record.game_title) || '—'
+    case 'genres':       return (record.genres || []).join(', ') || '—'
+    case 'description':  return record.description || '—'
+    case 'platform':     return (record.platforms || []).join(', ').toUpperCase() || '—'
+    case 'videoTrailer': return record.video_url || '—'
+    case 'coverImage':   return record.cover_image ? '✓ Official Cover Image available' : '—'
+    case 'screenshots':  return record.screenshots?.length ? `✓ ${record.screenshots.length} screenshot(s) available` : '—'
+    case 'links':        return record.cached_download_links?.length
       ? `${record.cached_download_links.length} link(s): ${record.cached_download_links.map(l => l.cloud_name).join(', ')}`
       : '—'
   }
@@ -269,7 +400,7 @@ const getFullValue = (key: FieldKey, record: GameGenerationRecord): string => {
 export default function AiAutoFillCard({
   aiQuery, setAiQuery, selectedModel, setSelectedModel,
   aiLoading, isApplying, aiError, aiPreview,
-  onGenerate, onApply, onCancel, onApplyCache
+  onGenerate, onApply, onCancel, onFilterChange, onApplyCache
 }: Props) {
   const [keyOptions, setKeyOptions]       = useState<KeyOption[]>([])
   const [loadingKeys, setLoadingKeys]     = useState(true)
@@ -281,11 +412,12 @@ export default function AiAutoFillCard({
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef  = useRef<HTMLUListElement>(null)
 
-  // ── New state ───────────────────────────────────────────────────────────────
-  const [isExpanded, setIsExpanded]   = useState(true)
-  const [fieldSel, setFieldSel]       = useState<CacheFieldSelection>(DEFAULT_FIELDS)
-  const [applyToast, setApplyToast]   = useState(false)
+  // ── New state (persisted via localStorage) ──────────────────────────────────
+  const [isExpanded, setIsExpanded]       = useState(true)
+  const [fieldSel, setFieldSel]           = useState<CacheFieldSelection>(loadSavedAiFilter)
+  const [applyToast, setApplyToast]       = useState(false)
   const [expandedFields, setExpandedFields] = useState<Set<FieldKey>>(new Set())
+  const [showFilterPanel, setShowFilterPanel] = useState(false)
 
   const selectedProvider = selectedModel.startsWith('groq:') ? 'groq' : 'gemini'
   const badgeLabel = selectedProvider === 'groq' ? 'Groq' : 'Gemini'
@@ -361,7 +493,7 @@ export default function AiAutoFillCard({
       if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); selectSuggestion(suggestions[activeIdx]); return }
       if (e.key === 'Escape') { setShowSuggestions(false); return }
     }
-    if (e.key === 'Enter') onGenerate()
+    if (e.key === 'Enter') onGenerate(fieldSel)
   }
 
   // ── Select a cached suggestion ──────────────────────────────────────────────
@@ -371,7 +503,8 @@ export default function AiAutoFillCard({
     setShowSuggestions(false)
     setCachedPreview(record)
     setIsExpanded(true)
-    setFieldSel(DEFAULT_FIELDS)
+    // Preserve the user's saved filter preferences
+    setFieldSel(loadSavedAiFilter())
     setApplyToast(false)
     setExpandedFields(new Set())
   }
@@ -393,20 +526,49 @@ export default function AiAutoFillCard({
     setCachedPreview(null)
     setApplyToast(false)
     setExpandedFields(new Set())
-    onGenerate()
+    onGenerate(fieldSel)
   }
 
   // ── Toggle a single checkbox ─────────────────────────────────────────────────
   const toggleField = (key: FieldKey) => {
-    setFieldSel(prev => ({ ...prev, [key]: !prev[key] }))
+    setFieldSel(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      try {
+        localStorage.setItem(AI_FILTER_STORAGE_KEY, JSON.stringify(next))
+      } catch (e) {
+        console.warn('Failed to save AI filter to localStorage', e)
+      }
+      onFilterChange?.(next)
+      return next
+    })
   }
 
   // ── Select all / none ────────────────────────────────────────────────────────
   const allChecked = Object.values(fieldSel).every(Boolean)
   const toggleAll  = () => {
     const next = !allChecked
-    setFieldSel({ title: next, genres: next, platform: next, size: next, description: next, images: next, links: next })
+    const updated: CacheFieldSelection = {
+      title: next,
+      size: next,
+      slug: next,
+      genres: next,
+      description: next,
+      platform: next,
+      videoTrailer: next,
+      coverImage: next,
+      screenshots: next,
+      links: next,
+    }
+    try {
+      localStorage.setItem(AI_FILTER_STORAGE_KEY, JSON.stringify(updated))
+    } catch (e) {
+      console.warn('Failed to save AI filter to localStorage', e)
+    }
+    setFieldSel(updated)
+    onFilterChange?.(updated)
   }
+
+  const selectedCount = Object.values(fieldSel).filter(Boolean).length
 
   // ── Toggle expanded field ────────────────────────────────────────────────────
   const toggleExpandField = (e: React.MouseEvent, key: FieldKey) => {
@@ -503,12 +665,51 @@ export default function AiAutoFillCard({
                 ))
             }
           </Select>
-          <AiGenerateBtn $loading={aiLoading} onClick={onGenerate} disabled={aiLoading || !aiQuery.trim()}>
+          <AiGenerateBtn $loading={aiLoading} onClick={() => onGenerate(fieldSel)} disabled={aiLoading || !aiQuery.trim()}>
             {aiLoading ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Wand2 size={14} />}
             {aiLoading ? 'Generating...' : 'Generate'}
           </AiGenerateBtn>
+          <FilterToggleBtn
+            type="button"
+            $active={showFilterPanel}
+            onClick={() => setShowFilterPanel(p => !p)}
+            title="Configure generation fields"
+          >
+            <SlidersHorizontal size={14} />
+            <span>Filter {selectedCount < FIELD_LABELS.length ? `(${selectedCount})` : ''}</span>
+            {showFilterPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </FilterToggleBtn>
         </AiOptionRow>
       </AiInputRow>
+
+      {/* ── Inline Filter Panel ─────────────────────────────────────────────── */}
+      <FilterPanel $open={showFilterPanel}>
+        <FilterGrid>
+          {/* Header row */}
+          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(148,163,184,0.5)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <SlidersHorizontal size={10} /> Generation Filter
+            </span>
+            <button
+              type="button"
+              onClick={toggleAll}
+              style={{ background: 'none', border: '1px solid rgba(124,58,237,0.4)', borderRadius: 5, color: '#a78bfa', fontSize: 11, fontWeight: 700, padding: '2px 8px', cursor: 'pointer' }}
+            >
+              {allChecked ? 'Deselect All' : 'Select All'}
+            </button>
+          </div>
+          {FIELD_LABELS.map(({ key, emoji, label }) => (
+            <FilterCheckItem key={key} htmlFor={`gen-filter-${key}`}>
+              <CheckBox
+                id={`gen-filter-${key}`}
+                checked={fieldSel[key]}
+                onChange={() => toggleField(key)}
+              />
+              <span>{emoji} {label}</span>
+            </FilterCheckItem>
+          ))}
+        </FilterGrid>
+      </FilterPanel>
 
       {aiError && (
         <p style={{ fontSize: 12, color: '#ef4444', marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -631,20 +832,25 @@ export default function AiAutoFillCard({
       {aiPreview && !cachedPreview && (
         <AiResultCard>
           <div style={{ marginBottom: 12, borderBottom: '1px dashed rgba(124,58,237,0.2)', paddingBottom: 12 }}>
-            <AiResultRow><AiResultKey>🎮 Title</AiResultKey><AiResultVal>{aiPreview.title}</AiResultVal></AiResultRow>
-            <AiResultRow><AiResultKey>🏷️ Genres</AiResultKey><AiResultVal>{(aiPreview.genres || []).join(', ')}</AiResultVal></AiResultRow>
-            <AiResultRow><AiResultKey>🕹️ Platform</AiResultKey><AiResultVal>{(aiPreview.platforms || []).join(', ').toUpperCase()}</AiResultVal></AiResultRow>
-            <AiResultRow><AiResultKey>💾 Size</AiResultKey><AiResultVal>{aiPreview.file_size}</AiResultVal></AiResultRow>
-            <AiResultRow>
-              <AiResultKey>📝 Desc</AiResultKey>
-              <AiResultVal style={{ maxHeight: 70, overflow: 'hidden', maskImage: 'linear-gradient(to bottom, black 60%, transparent)' }}>
-                {aiPreview.description}
-              </AiResultVal>
-            </AiResultRow>
+            {fieldSel.title && <AiResultRow><AiResultKey>🎮 Title</AiResultKey><AiResultVal>{aiPreview.title || '—'}</AiResultVal></AiResultRow>}
+            {fieldSel.size && <AiResultRow><AiResultKey>💾 Size</AiResultKey><AiResultVal>{aiPreview.file_size || '—'}</AiResultVal></AiResultRow>}
+            {fieldSel.genres && <AiResultRow><AiResultKey>🏷️ Category</AiResultKey><AiResultVal>{(aiPreview.genres || []).join(', ') || '—'}</AiResultVal></AiResultRow>}
+            {fieldSel.platform && <AiResultRow><AiResultKey>🕹️ Platform</AiResultKey><AiResultVal>{(aiPreview.platforms || []).join(', ').toUpperCase() || '—'}</AiResultVal></AiResultRow>}
+            {fieldSel.videoTrailer && <AiResultRow><AiResultKey>🎬 Trailer</AiResultKey><AiResultVal>{aiPreview.video_url || 'YouTube Auto-search'}</AiResultVal></AiResultRow>}
+            {fieldSel.coverImage && <AiResultRow><AiResultKey>🖼️ Cover</AiResultKey><AiResultVal>Official Cover Image</AiResultVal></AiResultRow>}
+            {fieldSel.screenshots && <AiResultRow><AiResultKey>📸 Previews</AiResultKey><AiResultVal>In-game Screenshots</AiResultVal></AiResultRow>}
+            {fieldSel.description && (
+              <AiResultRow>
+                <AiResultKey>📝 Desc</AiResultKey>
+                <AiResultVal style={{ maxHeight: 70, overflow: 'hidden', maskImage: 'linear-gradient(to bottom, black 60%, transparent)' }}>
+                  {aiPreview.description || '—'}
+                </AiResultVal>
+              </AiResultRow>
+            )}
           </div>
-          <ApplyBtn $loading={isApplying} onClick={onApply} disabled={isApplying}>
+          <ApplyBtn $loading={isApplying} onClick={() => onApply(fieldSel)} disabled={isApplying || selectedCount === 0}>
             {isApplying ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={16} />}
-            {isApplying ? 'Applying & Fetching Images...' : 'Apply & Fetch Images'}
+            {isApplying ? 'Applying & Fetching Images...' : `Apply Selected Fields (${selectedCount})`}
           </ApplyBtn>
           {!isApplying && <CancelBtn onClick={onCancel}>Cancel</CancelBtn>}
         </AiResultCard>

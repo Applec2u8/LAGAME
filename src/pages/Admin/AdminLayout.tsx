@@ -90,7 +90,12 @@ const Backdrop = styled.div<{ $open: boolean }>`
   position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199;
 `
 
-const Content = styled.div`padding: 32px 24px; flex: 1;`
+const Content = styled.div`
+  padding: 32px 24px; flex: 1;
+  @media (max-width: 768px) {
+    padding: 16px 12px;
+  }
+`
 
 const navItems = [
   { to: '/ap-admin/dashboard', icon: <LayoutDashboard size={16} />, label: 'Dashboard' },
